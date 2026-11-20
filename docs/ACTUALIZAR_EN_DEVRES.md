@@ -1,62 +1,36 @@
-# Actualizar en el servidor `devres` (o el host SSH equivalente)
+# Actualización desde Ubuntu Server — Hospital Digital Lab v0.3.0
 
-## Orden recomendado
+**Servidor de trabajo:** `homeserverv2`, directorio `~/apps/hospital-digital-lab`.
 
-**1.** Descarga el paquete `hospital-digital-lab-v0.2.2.zip` de Drive a tu computadora y transfiérelo por SSH/SCP a tu servidor. Sustituye el nombre de host por tu alias SSH real si `devres` no resuelve.
+No hace falta otra PC, PowerShell ni `rclone` si el servidor permite descargar el ZIP desde Google Drive, como en la versión anterior.
 
-```bash
-scp hospital-digital-lab-v0.2.2.zip renan@devres:/tmp/
-```
+## Despliegue
 
-**2.** En una sesión SSH de `devres`, verifica la instalación previa y expande el ZIP en el directorio de trabajo:
+La versión se distribuye en `hospital-digital-lab-v0.3.0.zip`. Descarga el archivo a `/tmp` con `curl` usando su enlace de Drive. **Verifica SHA-256** antes de descomprimir. Desde el directorio extraído ejecuta:
 
 ```bash
-ssh renan@devres
-cd ~/apps/hospital-digital-lab
-docker compose ps
-curl -fsS http://127.0.0.1:8765/healthz
-
-cd ~/apps
-unzip -q /tmp/hospital-digital-lab-v0.2.2.zip
+bash scripts/release_on_server.sh "$HOME/apps/hospital-digital-lab"
 ```
 
-**3.** Ejecuta la actualización segura. El script crea antes un respaldo consistente de la base SQLite y un paquete del código actual en `~/hospital-lab-backups/`. Conserva el archivo `.env`, usuarios docentes, aulas y volumen Docker.
+Requiere `gh` autenticado como `RenanEspinar`. El script:
 
-```bash
-bash ~/apps/hospital-digital-lab-v0.2.2/scripts/deploy_safely.sh "$HOME/apps/hospital-digital-lab"
-```
+1. Clona `main` a una carpeta temporal y copia el código sin `.env`, bases de datos ni secretos.
+2. Valida los archivos y publica un commit en GitHub.
+3. Hace un respaldo SQLite consistente mediante el contenedor actual a `~/hospital-lab-backups/antes-de-v03-.../` y guarda una copia del código.
+4. Actualiza **solo el servicio `app`** de Docker y espera una respuesta `healthz` con `version: 0.3.0`.
 
-**4.** Revisa el resultado y la URL del proxy que ya utilizas:
+Si falla el push, no se inicia el despliegue. Si Docker no inicia, **el script no aplica rollback automático**: revisa `docker compose logs --tail=100 app` y conserva el respaldo. Nunca uses `docker compose down -v`.
+
+## Verificación
 
 ```bash
 cd ~/apps/hospital-digital-lab
 docker compose ps
-docker compose logs --tail=80 app
 curl -fsS http://127.0.0.1:8765/healthz
 ```
 
-La respuesta esperada incluye `"version":"0.2.2"`. Si tienes un puerto personalizado, usa el valor de `APP_PORT` de `.env`.
+Se espera `"version":"0.3.0"` y un contenedor saludable. Después valida en navegador el panel docente: distribución 3/4 estudiantes, guardar, un incidente con Farmacia/Imagenología virtual y actuación humana de Clínica.
 
-## Respuesta a incidentes de despliegue
+## Compatibilidad
 
-Si el nuevo contenedor no inicia, conserva intactos los respaldos. El script detiene su ejecución al fallar, **no ejecuta un rollback automático**. Antes de revertir, revisa `docker compose logs app` y el contenido de `~/hospital-lab-backups/antes-de-v02-.../`.
-
-Para revertir, restaura el código desde `source.tar.gz` y la base de datos desde `hospital.sqlite` con el contenedor detenido. El lugar exacto del volumen debe comprobarse mediante `docker volume inspect` antes de escribir: no adivines nombres de volúmenes ni borres el volumen con `down -v`.
-
-## Código publicado en GitHub
-
-El código fuente de esta versión está disponible en el repositorio `RenanEspinar/hospital-digital-lab`. No es necesario ejecutar `git add` o `git push` desde el servidor para publicar esta actualización.
-
-Si prefieres obtener el código mediante GitHub en lugar de descargar el ZIP, utiliza un clon temporal, separado de la instalación activa, y ejecuta el mismo script de respaldo y actualización:
-
-```bash
-cd ~/apps
-git clone --depth 1 https://github.com/RenanEspinar/hospital-digital-lab.git hospital-digital-lab-release
-bash ~/apps/hospital-digital-lab-release/scripts/deploy_safely.sh "$HOME/apps/hospital-digital-lab"
-```
-
-**Nota:** el instalador preserva la carpeta `.git` que exista en el destino; si se instaló mediante copia de archivos, puede quedar con cambios locales respecto a su rama. No ejecutes `git reset --hard`, `git clean -fd` ni `docker compose down -v` sobre el proyecto activo sin revisar su estado.
-
-## Seguridad de los alumnos
-
-Comparte la URL **HTTPS** y el código de aula, nunca la contraseña de `.env`. El simulador sigue usando datos ficticios y no autentica identidades institucionales.
+La migración agrega `role_staffing` y no elimina tablas existentes ni aulas. La configuración inicial de las aulas previas permanece con seis roles humanos. El acceso HTTPS/proxy, la clave `ADMIN_PASSWORD` y el volumen de SQLite permanecen intactos.

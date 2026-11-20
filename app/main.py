@@ -1,4 +1,4 @@
-"""API de Hospital Digital Lab v0.2: solo simulación, no uso clínico."""
+"""API de Hospital Digital Lab v0.3: solo simulación, no uso clínico."""
 from __future__ import annotations
 import asyncio,csv,io,os,secrets,time
 from collections import defaultdict,deque
@@ -9,6 +9,7 @@ from fastapi import FastAPI,HTTPException,Request,WebSocket,WebSocketDisconnect,
 from fastapi.responses import FileResponse,Response
 from pydantic import BaseModel,Field
 from . import storage as db
+from . import bots
 
 ADMIN_PASSWORD=os.environ.get('ADMIN_PASSWORD','')
 STATIC=Path(__file__).parent/'static'
@@ -32,7 +33,9 @@ async def auto_loop():
     while True:
         await asyncio.sleep(5)
         try:
-            for rid in await asyncio.to_thread(db.auto_tick):await connections.send(rid)
+            generated=await asyncio.to_thread(db.auto_tick)
+            processed=await asyncio.to_thread(bots.auto_staff_tick)
+            for rid in set(generated+processed):await connections.send(rid)
         except Exception as e:
             import logging
             logging.getLogger(__name__).exception('Fallo del motor: %s',e)
@@ -48,7 +51,7 @@ async def lifespan(app):
         work.cancel()
         with suppress(asyncio.CancelledError):await work
 
-app=FastAPI(title='Hospital Digital Lab',version='0.2.2',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
+app=FastAPI(title='Hospital Digital Lab',version='0.3.0',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
 
 @app.middleware('http')
 async def security(request:Request,call_next):
@@ -67,7 +70,7 @@ def static(name:str):
     if name not in ('app.js','styles.css'):raise HTTPException(404)
     return FileResponse(STATIC/name)
 @app.get('/healthz')
-def health():return {'status':'ok','application':'hospital-digital-lab','version':'0.2.2'}
+def health():return {'status':'ok','application':'hospital-digital-lab','version':'0.3.0'}
 
 class Login(BaseModel):password:str=Field(min_length=1,max_length=200)
 class Join(BaseModel):
@@ -106,6 +109,7 @@ def join(p:Join,req:Request):
     if p.role not in db.ROLES:raise HTTPException(400,'Rol no válido.')
     room=db.find_room(p.code.strip().upper())
     if not room:raise HTTPException(404,'Código de aula incorrecto.')
+    if db.is_automated_role(room['id'],p.role):raise HTTPException(409,'Esta área está asignada a un agente automático. Selecciona un rol humano o pide al docente que cambie la configuración.')
     name=p.name.strip()
     if len(name)<2 or any(ord(c)<32 for c in name):raise HTTPException(400,'Nombre no válido.')
     return {'token':db.register_session(room['id'],name,p.role),'role':p.role,'name':name,'room':room,'expires_hours':12}
@@ -124,6 +128,7 @@ def state(code:str,s=Depends(authenticate)):
 @app.post('/api/action/{code}')
 async def action(code:str,p:Action,s=Depends(authenticate)):
     room=check_room(s,code)
+    if s['role']!='DOCENTE' and db.is_automated_role(room['id'],s['role']):raise HTTPException(403,'Esta estación está ahora automatizada. Consulta al docente.')
     if not limited(_actions,str(s['id']),60,60):raise HTTPException(429,'Demasiadas acciones.')
     try:output=await asyncio.to_thread(db.action,room['id'],s['name'],s['role'],p.kind,p.target_id,p.value)
     except (db.ActionError,ValueError) as e:raise HTTPException(400,str(e))

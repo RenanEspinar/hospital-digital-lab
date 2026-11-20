@@ -1,6 +1,16 @@
-# Hospital Digital Lab · v0.2.2
+# Hospital Digital Lab · v0.3.0
 
 Simulador web educativo multiusuario para formación en sistemas hospitalarios, ingeniería biomédica, operación e interoperabilidad didáctica. **No es un sistema clínico real.** Pacientes, alarmas, parámetros, órdenes e informes son sintéticos. No se permite cargar datos personales, usar decisiones del simulador con pacientes ni conectar dispositivos médicos.
+
+## Novedad v0.3.0 — Hospital híbrido
+
+En cada aula el docente elige entre **1 y 6 áreas humanas**, con accesos rápidos para 2, 3, 4 o 6 estudiantes. Las áreas no seleccionadas son atendidas por **agentes virtuales** que ejecutan acciones en secuencia (ritmo configurable de 10, 15 o 30 segundos, más dispersión aleatoria). Los agentes no saltan dependencias: HIS admite antes de la recepción de Clínica; LIS informa antes de que Clínica reconozca el resultado, y así sucesivamente.
+
+- Los agentes ejecutan exclusivamente las acciones permitidas de su departamento y se identifican como `AUTO · ...` en la auditoría CSV; los eventos incluyen `automated: true`.
+- Los incidentes manuales siguen disponibles y los agentes virtuales trabajan incluso si el generador de incidentes está en **Manual** o **Pausado**. El modo **Automático** controla la generación de *nuevos incidentes*, no el personal virtual.
+- Por seguridad didáctica, una estación asignada al agente virtual no admite nuevas sesiones de alumnos. Si el docente cambia el rol con alumnos ya conectados, estos no pueden ejecutar acciones hasta que se reactive el rol humano.
+- Las aulas existentes mantienen los seis roles en modo **humano** hasta que el docente cambie expresamente la distribución. No se cambia ningún dato de pacientes ni de incidencias anteriores.
+- Los agentes únicamente manipulan registros ficticios: ningún tratamiento ni decisión clínica real.
 
 ## Novedades principales
 

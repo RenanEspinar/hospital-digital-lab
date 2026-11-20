@@ -11,10 +11,10 @@ fi
 command -v docker >/dev/null || { echo 'Docker no está instalado.' >&2; exit 1; }
 (cd "$TARGET" && docker compose version >/dev/null)
 STAMP="$(date +%Y%m%d-%H%M%S)"
-BACKUP="$HOME/hospital-lab-backups/antes-de-v02-$STAMP"
+BACKUP="$HOME/hospital-lab-backups/antes-de-v03-$STAMP"
 mkdir -p "$BACKUP"
 chmod 700 "$BACKUP"
-echo '1/4 Respaldo del código ACTUAL (v0.1) y SQLite desde contenedor activo'
+echo '1/4 Respaldo del código actual y SQLite desde contenedor activo'
 tar --exclude='./.env' --exclude='./.git' --exclude='./.venv' --exclude='./__pycache__' \
   --exclude='./.pytest_cache' --exclude='./backups' -czf "$BACKUP/source.tar.gz" -C "$TARGET" .
 CID="$(cd "$TARGET" && docker compose ps -q app)"
@@ -40,10 +40,17 @@ echo '2/4 Copia de los archivos nuevos, preservando .env y volumen'
 tar -C "$SOURCE" -cf - \
  --exclude='./.env' --exclude='./.git' --exclude='./.venv' \
  --exclude='./__pycache__' --exclude='./.pytest_cache' . | tar -C "$TARGET" -xf -
-# Un entrypoint anterior no permanece activo: v0.2 usa el CMD del nuevo Dockerfile.
+# Un entrypoint anterior no permanece activo: v0.3 usa el CMD del nuevo Dockerfile.
 echo '3/4 Construcción y actualización SOLO del servicio app'
 (cd "$TARGET" && docker compose config -q && docker compose up -d --build --no-deps app)
 echo '4/4 Verificación de salud'
 (cd "$TARGET" && docker compose exec -T app python -c \
- 'import json,urllib.request; x=json.load(urllib.request.urlopen("http://127.0.0.1:8000/healthz",timeout=10)); assert x["version"]=="0.2.2",x; print("Servicio OK:",x)')
+ 'import json,time,urllib.request; last=None
+for _ in range(45):
+ try:
+  x=json.load(urllib.request.urlopen("http://127.0.0.1:8000/healthz",timeout=3))
+  assert x["version"]=="0.3.0",x
+  print("Servicio OK:",x); break
+ except Exception as e: last=e; time.sleep(2)
+else: raise SystemExit("Falló comprobación de salud: "+str(last))')
 printf '\nActualización terminada. Respaldo anterior: %s\n' "$BACKUP"

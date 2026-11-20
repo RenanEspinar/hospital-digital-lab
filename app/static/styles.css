@@ -4,3 +4,24 @@
 @media(max-width:650px){.topbar{padding:0 13px}.brand strong{font-size:12px}.brand small{font-size:7px}.signal{font-size:9px}.sidebar{width:53px;flex-basis:53px;padding:10px 3px}.nav{padding:10px 3px}.nav-ico{font-size:17px}.avatar{height:32px;width:32px;font-size:11px}.identity{padding:4px}.main{padding:18px 10px}.page-head h1{font-size:25px}.head-actions .btn{font-size:10px;padding:8px}.teacher-grid{grid-template-columns:1fr 1fr}.teacher-grid .mini-form{grid-column:span 2}.metric-grid{grid-template-columns:1fr 1fr;gap:7px}.metric{padding:11px}.metric strong{font-size:24px}.panel,.teacher-panel{padding:13px}.ward{min-height:85px;padding:10px}.action-field{grid-template-columns:1fr}.action-field.two{grid-template-columns:1fr}.welcome-wrap{display:block;padding:30px 15px}.hero h1{font-size:42px}.hero>p{font-size:15px}.entry-card{max-width:none;margin-top:25px}.scenario-head{flex-direction:column;gap:2px}}
 
 .monitor-card{margin-top:13px;background:#112831;border-radius:10px;padding:12px 15px;color:#c1d9e0}.monitor-label{display:flex;justify-content:space-between;gap:8px;color:#85aeb6;font-size:9px;font-weight:850;letter-spacing:.11em}.monitor-row{display:flex;gap:12px;align-items:center;margin:8px 0}.monitor-row canvas{width:72%;height:90px;max-width:calc(100% - 105px);background:#142f37;border-radius:6px}.monitor-numbers{flex:1}.monitor-numbers div{display:flex;gap:5px;align-items:baseline}.monitor-numbers small{color:#a6c3ca;font-size:10px}.monitor-numbers strong{font-size:24px;color:#5fe6ba;line-height:1.4}.monitor-numbers div:last-child strong{color:#7bdcf4}.monitor-numbers div:last-child strong.critical{color:#fa7b86}.monitor-legal{font-size:9px;color:#81a5ae}.monitor-label .danger-text{color:#f78692}
+
+/* Staffing panel: human stations vs automated agents. */
+.staff-panel{border:1px solid var(--line);border-radius:13px;padding:17px 18px;margin:17px 0;background:#f8fbfe}
+.staff-heading{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px}
+.staff-heading h3{font-size:15px;margin:0 0 3px;color:var(--navy)}
+.staff-heading p{margin:0;color:var(--muted);font-size:12px;line-height:1.5;max-width:790px}
+.staff-status{font-size:12px;font-weight:750;color:var(--blue)}
+.staff-presets{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}
+.staff-presets button{background:#eef5fd;border:1px solid #b7d2eb;color:#14568f;border-radius:8px;padding:8px 11px;font-size:12px;cursor:pointer}
+.staff-presets button:hover{background:#dcecff}
+.staff-roles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.staff-role{display:grid;grid-template-columns:18px minmax(0,1fr);align-items:center;column-gap:9px;row-gap:0;border:1px solid #d9e4ef;background:#fff;border-radius:9px;padding:10px;font-size:12px;cursor:pointer}
+.staff-role input{width:16px;height:16px;grid-row:span 2;accent-color:var(--blue)}
+.staff-role span{font-weight:750;line-height:1.3}
+.staff-role small{font-size:10px;color:var(--muted)}
+.staff-controls{display:flex;align-items:end;flex-wrap:wrap;gap:12px;margin-top:15px}
+.staff-controls label{flex:0 1 250px;font-size:12px}
+.staff-controls select{width:100%}
+.staff-controls #staffing-notice{font-size:11px;color:var(--muted);flex:1 1 270px}
+@media(max-width:950px){.staff-roles{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.staff-roles{grid-template-columns:1fr}.staff-panel{padding:12px}}

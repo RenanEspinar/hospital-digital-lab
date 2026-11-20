@@ -154,7 +154,7 @@ def test_websocket_and_assets(tmp_path):
             assert ws.receive_json()['type']=='connected'
             scenario(c,code,a,'llegada_masiva')
             assert ws.receive_json()['type']=='refresh'
-        assert c.get('/healthz').json()['version']=='0.2.2'
+        assert c.get('/healthz').json()['version']=='0.3.0'
         assert c.get('/static/app.js').status_code==200
         assert c.get('/static/styles.css').status_code==200
         assert c.get('/static/no.js').status_code==404
