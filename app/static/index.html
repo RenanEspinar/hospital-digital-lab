@@ -1,101 +1,42 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
-  <title>Hospital Digital | Simulación HIS · LIS · Ingeniería Biomédica</title>
-  <link rel="stylesheet" href="/static/styles.css">
-  <script defer src="/static/app.js"></script>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#10243d">
+<title>Hospital Digital Lab · Simulación hospitalaria</title>
+<link rel="stylesheet" href="/static/styles.css"><script defer src="/static/app.js"></script>
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand"><span class="brand-icon">✚</span><div><strong>HOSPITAL DIGITAL</strong><small>LABORATORIO DE SISTEMAS DE SALUD</small></div></div>
-    <div class="header-right"><span class="pill blue">DATOS SINTÉTICOS</span><span id="connection-status" class="pill">SIN CONEXIÓN</span></div>
-  </header>
-  <main>
-    <section id="welcome" class="welcome">
-      <div class="welcome-copy">
-        <span class="eyebrow">TECH LAB BOLIVIA · ENTORNO DOCENTE</span>
-        <h1>Un hospital.<br><em>Varios sistemas.</em><br>Decisiones conectadas.</h1>
-        <p>Simula admisiones, órdenes clínicas, resultados de laboratorio y gestión de equipos. Cada acción aparece en todos los puestos del aula.</p>
-        <div class="welcome-stats"><span>HIS</span><span>LIS</span><span>ENFERMERÍA</span><span>BIOMÉDICA</span></div>
-        <p class="notice">Solo formación. No introducir nombres, datos clínicos ni identificadores de personas reales. No es un sistema de atención médica.</p>
-      </div>
-      <div class="login-column">
-        <div class="panel form-panel">
-          <div class="tab-list"><button id="student-tab" class="tab active" type="button">Estudiante</button><button id="teacher-tab" class="tab" type="button">Docente</button></div>
-          <form id="student-form" class="stack">
-            <label>Código del aula<input required name="code" minlength="8" maxlength="12" placeholder="Ej. ABCEFG234" autocomplete="off"></label>
-            <label>Tu nombre (solo identificación académica)<input required name="name" minlength="2" maxlength="60" placeholder="Ej. Grupo UCI 1" autocomplete="off"></label>
-            <label>Rol asignado<select name="role"><option value="HIS">Admisiones · HIS</option><option value="CLINICA">Enfermería · clínica</option><option value="LIS">Laboratorio · LIS</option><option value="BIOMED">Ingeniería biomédica</option></select></label>
-            <button class="primary" type="submit">Entrar al hospital →</button>
-          </form>
-          <form id="teacher-form" class="stack hidden">
-            <label>Clave del docente<input required type="password" name="password" placeholder="Clave configurada en el servidor" autocomplete="current-password"></label>
-            <button class="primary" type="submit">Acceder como docente →</button>
-          </form>
-          <p id="login-error" class="form-error" role="alert"></p>
-        </div>
-      </div>
-    </section>
-    <section id="app" class="hidden">
-      <div class="screen-header">
-        <div><span class="eyebrow">CENTRO DE CONTROL · SIMULACIÓN</span><h1 id="room-title">Hospital digital</h1><div class="inline-meta"><span id="role-label"></span> · <span id="user-label"></span> · Aula <strong id="room-code"></strong></div></div>
-        <div class="screen-header-actions"><button id="enable-audio" class="outline" type="button">Activar alarmas sonoras</button><button id="copy-code" class="outline" type="button">Copiar código</button><button id="logout" class="outline" type="button">Salir</button></div>
-      </div>
-      <div id="teacher-management" class="panel teacher-management hidden">
-        <div class="section-heading"><h2>Control docente</h2><span class="subtle">Administrar escenarios y aulas</span></div>
-        <div class="teacher-fields">
-          <form id="create-room-form" class="inline-form"><input name="title" maxlength="90" required placeholder="Nombre del aula: Clase 5 · Grupo A"><button class="primary" type="submit">Crear aula</button></form>
-          <label class="compact-select">Abrir aula <select id="rooms-select"></select></label>
-          <button id="export-events" class="outline" type="button">Exportar auditoría CSV</button>
-        </div>
-      </div>
-      <div id="waiting-room" class="panel hidden"><h2>Crea tu primera aula</h2><p>Los estudiantes ingresarán mediante un código. Cada aula mantiene sus propios pacientes ficticios, dispositivos y eventos.</p></div>
-      <div id="simulation" class="hidden">
-        <div class="metric-grid" id="metrics">
-          <div class="metric"><span>Ocupación de camas</span><strong id="metric-occupancy">—</strong><small id="metric-beds">—</small></div>
-          <div class="metric"><span>Equipos operativos</span><strong id="metric-devices">—</strong><small>Gestión de activos</small></div>
-          <div class="metric"><span>Alarmas activas</span><strong id="metric-alarms">—</strong><small>Clínicas y técnicas</small></div>
-          <div class="metric"><span>Órdenes LIS pendientes</span><strong id="metric-lab">—</strong><small>Solicitadas o recibidas</small></div>
-          <div class="metric"><span>Reconocimiento medio</span><strong id="metric-ack">—</strong><small>Segundos · esta aula</small></div>
-        </div>
-        <div class="two-column">
-          <section class="panel hospital-panel"><div class="section-heading"><h2>Plano del hospital</h2><span class="subtle">Selecciona un servicio</span></div>
-            <div class="floor-map" aria-label="Mapa conceptual del hospital">
-              <svg viewBox="0 0 900 470" role="img" aria-label="Seis sectores del hospital">
-                <rect width="900" height="470" rx="14" fill="#f4f7fb"/>
-                <path d="M44 220H856M450 30V438" stroke="#d2dfeb" stroke-width="24" stroke-linecap="round"/>
-                <g class="map-unit selected" data-unit="URG"><rect x="28" y="28" width="374" height="166" rx="10"/><text x="51" y="77" class="map-tag">01 / URGENCIAS</text><text x="51" y="116" class="map-strong" data-map="URG">—</text><text x="51" y="147" class="map-info">Admisión · triage</text></g>
-                <g class="map-unit" data-unit="UCI"><rect x="498" y="28" width="374" height="166" rx="10"/><text x="521" y="77" class="map-tag">02 / UCI</text><text x="521" y="116" class="map-strong" data-map="UCI">—</text><text x="521" y="147" class="map-info">Monitoreo · alarmas</text></g>
-                <g class="map-unit" data-unit="HOSP"><rect x="28" y="270" width="255" height="165" rx="10"/><text x="48" y="317" class="map-tag">03 / HOSPITALIZACIÓN</text><text x="48" y="361" class="map-strong" data-map="HOSP">—</text><text x="48" y="392" class="map-info">Camas · evolución</text></g>
-                <g class="map-unit" data-unit="LAB"><rect x="307" y="270" width="177" height="165" rx="10"/><text x="324" y="317" class="map-tag">04 / LAB</text><text x="324" y="361" class="map-strong" data-map="LAB">LIS</text><text x="324" y="392" class="map-info">Muestras</text></g>
-                <g class="map-unit" data-unit="QX"><rect x="508" y="270" width="166" height="165" rx="10"/><text x="523" y="317" class="map-tag">05 / QUIRÓFANOS</text><text x="523" y="361" class="map-strong" data-map="QX">QX</text><text x="523" y="392" class="map-info">Equipos</text></g>
-                <g class="map-unit" data-unit="BIO"><rect x="698" y="270" width="174" height="165" rx="10"/><text x="714" y="317" class="map-tag">06 / BIOMÉDICA</text><text x="714" y="361" class="map-strong" data-map="BIO">ING.</text><text x="714" y="392" class="map-info">Soporte técnico</text></g>
-              </svg>
-            </div>
-            <div class="selected-unit"><span id="unit-name">Urgencias</span><div id="unit-contents" class="unit-details"></div></div>
-            <div class="monitor-card" aria-label="Monitor clínico ficticio">
-              <div class="monitor-header"><span>MONITOR MULTIPARÁMETRO · DEMOSTRACIÓN</span><span id="monitor-unit">UCI</span></div>
-              <div class="monitor-content"><canvas id="ecg-canvas" width="570" height="90" aria-label="Onda ECG sintetizada para simulación"></canvas>
-                <div class="monitor-vitals"><div><small>FC</small><strong id="monitor-hr">78</strong><small>lpm</small></div><div><small>SpO₂</small><strong id="monitor-spo2">98</strong><small>%</small></div></div>
-              </div><div class="monitor-caption">Señal sintética, no conectada a un monitor médico. Parámetros ilustrativos.</div>
-            </div>
-          </section>
-          <section class="panel actions-panel"><div class="section-heading"><h2>Tu estación de trabajo</h2><span id="role-caption" class="subtle">Acciones según rol</span></div>
-            <div id="action-forms"></div>
-            <p class="notice small">Los resultados y alarmas son únicamente escenarios ficticios. No se generan decisiones clínicas reales.</p>
-          </section>
-        </div>
-        <div class="two-column lower">
-          <section class="panel"><div class="section-heading"><h2>Alarmas</h2><span class="subtle">Estado y reconocimiento</span></div><div id="alarm-list" class="stack-list"></div></section>
-          <section class="panel"><div class="section-heading"><h2>Intercambio de mensajes</h2><span class="subtle">Eventos HIS · LIS · Biomédica</span></div><div id="event-list" class="stack-list timeline"></div></section>
-        </div>
-        <footer class="footer">Hospital Digital Lab · Simulador educativo no clínico · Tech Lab Bolivia · Sin datos reales de pacientes</footer>
-      </div>
-    </section>
+<header class="topbar"><a class="brand" href="/" aria-label="Hospital Digital Lab"><span class="brand-mark">✳</span><span><strong>HOSPITAL DIGITAL</strong><small>LABORATORIO DE SIMULACIÓN</small></span></a><span class="top-right"><span class="signal" id="connection-label">ENTORNO DOCENTE</span><span class="version">v0.2</span></span></header>
+<section id="welcome" class="welcome-wrap">
+  <div class="hero"><div class="eyebrow">CENTRO DE ENTRENAMIENTO DIGITAL / 2026</div><h1>Un hospital.<br><em>Decisiones conectadas.</em></h1><p>Simula el funcionamiento de un hospital con equipos de estudiantes. Gestiona pacientes ficticios, responde a incidentes y coordina decisiones entre departamentos.</p>
+  <div class="hero-features"><span>6 estaciones</span><span>Incidentes en vivo</span><span>Auditoría completa</span></div>
+  <div class="safe"><strong>Solo formación académica.</strong> Todos los datos son ficticios. No introducir información de pacientes reales ni conectar equipos médicos.</div></div>
+  <div class="entry-card"><div class="tabs"><button id="tab-student" class="tab active" type="button">Estudiante</button><button id="tab-teacher" class="tab" type="button">Docente</button></div>
+    <form id="student-form" class="entry-form"><h2>Acceso a la simulación</h2><p>Ingresa el código del aula y el rol asignado por tu docente.</p>
+      <label>Código de aula<input name="code" autocomplete="off" minlength="8" maxlength="12" placeholder="Ej. K7NP45Q2D" required></label>
+      <label>Nombre o equipo<input name="name" maxlength="60" minlength="2" placeholder="Ej. Grupo 3" required></label>
+      <label>Área de trabajo<select name="role"><option value="HIS">Admisiones / HIS</option><option value="CLINICA">Clínica y enfermería</option><option value="LIS">Laboratorio / LIS</option><option value="BIOMED">Ingeniería biomédica</option><option value="FARMACIA">Farmacia hospitalaria</option><option value="IMAGENES">Diagnóstico por imagen</option></select></label>
+      <button class="btn primary" type="submit">Ingresar a mi estación <span>→</span></button></form>
+    <form id="teacher-form" class="entry-form hidden"><h2>Centro de control</h2><p>Acceso reservado al docente. Nunca compartas tu contraseña.</p><label>Contraseña docente<input name="password" type="password" autocomplete="current-password" required></label><button class="btn primary" type="submit">Entrar al centro de control <span>→</span></button></form><p id="form-error" class="form-error" role="alert"></p></div>
+</section>
+<div id="workspace" class="workspace hidden">
+  <aside class="sidebar"><div class="sidebar-section">NAVEGACIÓN</div><button class="nav active" data-view="overview"><span class="nav-ico">▦</span>Centro de operaciones</button><button class="nav" data-view="incidents"><span class="nav-ico">◈</span>Incidentes <span id="nav-count" class="counter">0</span></button><button class="nav" data-view="patients"><span class="nav-ico">♧</span>Pacientes y camas</button><button class="nav" data-view="devices"><span class="nav-ico">⚙</span>Equipamiento</button><button class="nav" data-view="audit"><span class="nav-ico">≡</span>Auditoría</button><div class="sidebar-divider"></div><div class="sidebar-section">MI SESIÓN</div><div class="identity"><div class="avatar" id="role-avatar">HI</div><div><strong id="identity-role">HIS</strong><small id="identity-user">Grupo</small></div></div><button id="tutorial-open" class="side-link">? Guía de mi rol</button><button id="logout" class="side-link">Salir de la sesión</button></aside>
+  <main class="main">
+    <div class="page-head"><div><div class="eyebrow" id="room-subtitle">SIMULACIÓN MULTIUSUARIO</div><h1 id="room-title">Centro de operaciones</h1><p id="welcome-line">Vigila la operación del hospital y coordina tu equipo.</p></div><div class="head-actions"><button class="btn light" id="copy-code">Copiar código</button><button class="btn light" id="enable-audio">Activar sonido</button><button class="btn light" id="refresh-data">Actualizar</button><button class="btn light" id="tutorial-open-top">Guía rápida</button><button class="btn light" id="logout-top">Salir</button><span id="room-code" class="code-pill">—</span></div></div>
+    <div id="no-rooms" class="empty-start hidden"><h2>Comienza creando un aula</h2><p>El docente puede crear aulas independientes y distribuir su código.</p></div>
+    <section id="teacher-panel" class="teacher-panel hidden"><div class="panel-heading"><div><span class="eyebrow">SOLO DOCENTE</span><h2>Dirección de simulación</h2></div><button id="export-csv" class="btn light">Exportar bitácora CSV</button></div>
+       <div class="teacher-grid"><form id="new-room" class="mini-form"><label>Nueva aula<input name="title" required minlength="3" maxlength="90" placeholder="Ej. Diplomado Grupo A"></label><button class="btn primary">Crear aula</button></form><label>Aula activa<select id="room-select"></select></label><label>Modo del motor<select id="simulation-mode"><option value="manual">Manual</option><option value="auto">Automático</option><option value="paused">Pausado</option></select></label><label>Dificultad<select id="simulation-difficulty"><option value="facil">Inicial</option><option value="normal">Intermedia</option><option value="intenso">Intensiva</option></select></label><label>Intervalo aleatorio<select id="simulation-interval"><option value="30">30 segundos</option><option value="60">1 minuto</option><option value="120">2 minutos</option><option value="180">3 minutos</option><option value="300">5 minutos</option><option value="600">10 minutos</option></select></label><button id="save-simulation" class="btn primary">Aplicar modo</button></div>
+       <div class="scenario-head"><strong>Generar incidente</strong><span>Los eventos manuales funcionan también con el motor pausado.</span></div><div class="scenario-actions" id="scenario-actions"><button data-scenario="desaturacion">Desaturación</button><button data-scenario="falla_equipo">Falla de equipo</button><button data-scenario="llegada_masiva">Nuevo ingreso</button><button data-scenario="resultado_critico">Laboratorio crítico</button><button data-scenario="desabastecimiento">Suministro pendiente</button><button data-scenario="imagen_urgente">Imagen urgente</button></div><div class="teacher-foot"><span id="engine-state">Motor manual</span><button class="danger-link" id="reset-room">Reiniciar aula</button></div></section>
+    <section id="dashboard" class="view"><div class="metric-grid"><div class="metric"><span>Camas ocupadas</span><strong id="metric-occupancy">—</strong><small id="metric-occupation-detail">—</small></div><div class="metric"><span>Equipos disponibles</span><strong id="metric-devices">—</strong><small>Estado instantáneo</small></div><div class="metric"><span>Incidentes abiertos</span><strong id="metric-incidents">—</strong><small id="metric-done">—</small></div><div class="metric"><span>Tareas pendientes</span><strong id="metric-tasks">—</strong><small>En todos los servicios</small></div><div class="metric"><span>Reconocimiento medio</span><strong id="metric-ack">—</strong><small>Segundos (alarmas)</small></div><div class="metric"><span>Órdenes LIS</span><strong id="metric-labs">—</strong><small>Pendientes de resultado</small></div></div>
+    <div class="columns"><div class="col-stack"><section class="panel"><div class="panel-heading"><div><span class="eyebrow">VISTA OPERATIVA</span><h2>Mapa de servicios</h2></div><span class="small-muted">Selecciona un área</span></div><div id="ward-map" class="ward-map"></div><div id="ward-detail" class="ward-detail"></div><div class="monitor-card"><div class="monitor-label"><span>MONITOR DIDÁCTICO / UCI</span><span id="monitor-state">DATOS SINTÉTICOS</span></div><div class="monitor-row"><canvas id="ecg" width="520" height="95" aria-label="Trazo sintético, no señal fisiológica real"></canvas><div class="monitor-numbers"><div><small>FC</small><strong id="monitor-hr">78</strong><small>lpm</small></div><div><small>SpO₂</small><strong id="monitor-oxygen">98</strong><small>%</small></div></div></div><small class="monitor-legal">Visualización ficticia. No reproduce parámetros, criterios ni alarmas clínicas reales.</small></div></section><section class="panel"><div class="panel-heading"><div><span class="eyebrow">SEGUIMIENTO</span><h2>Incidentes recientes</h2></div><button class="text-button" data-goto="incidents">Ver todos</button></div><div id="incident-summary"></div></section></div>
+    <div class="col-stack"><section class="panel station"><div class="panel-heading"><div><span class="eyebrow">ESTACIÓN ASIGNADA</span><h2 id="station-title">Tu estación de trabajo</h2></div><span class="tag" id="station-tag">HIS</span></div><p id="station-description" class="station-description"></p><div id="station-actions"></div></section><section class="panel"><div class="panel-heading"><div><span class="eyebrow">PRIORIZACIÓN</span><h2>Mi cola de tareas</h2></div><span id="my-task-count" class="count-label">0 pendientes</span></div><div id="my-tasks"></div></section></div></div></section>
+    <section id="incidents-view" class="view hidden"><div class="panel"><div class="panel-heading"><div><h2>Centro de incidentes</h2><p>Estado del ejercicio, prioridad, equipos involucrados y tareas asociadas.</p></div></div><div id="incident-list"></div></div><div class="panel lower"><h2>Alarmas clínicas y técnicas</h2><div id="alarm-list"></div></div></section>
+    <section id="patients-view" class="view hidden"><div class="panel"><div class="panel-heading"><div><h2>Censo hospitalario</h2><p>Personas y estados 100 % ficticios. Sin datos clínicos reales.</p></div></div><div id="patient-list"></div></div><div class="panel lower"><h2>Ingresos pendientes</h2><div id="arrival-list"></div></div></section>
+    <section id="devices-view" class="view hidden"><div class="panel"><div class="panel-heading"><div><h2>Inventario biomédico</h2><p>Estado técnico y unidad de ubicación.</p></div></div><div id="device-list"></div></div></section>
+    <section id="audit-view" class="view hidden"><div class="panel"><div class="panel-heading"><div><h2>Auditoría de eventos</h2><p>Quién hizo qué, en qué momento y cómo evolucionó la coordinación.</p></div></div><div id="audit-list"></div></div></section>
+    <footer>Hospital Digital Lab v0.2 · Entorno exclusivamente académico · Las alarmas, resultados y ondas son sintéticos y no son indicaciones clínicas.</footer>
   </main>
-  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
-</body>
-</html>
+</div>
+<div id="tutorial" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="tutorial-title"><div class="modal"><div class="modal-top"><span class="eyebrow">GUÍA DE INICIO RÁPIDO</span><button id="tutorial-close" class="x-close" aria-label="Cerrar">×</button></div><div class="step-track" id="step-track"></div><div class="tutorial-icon" id="tutorial-icon">01</div><h2 id="tutorial-title"></h2><p id="tutorial-text"></p><div class="tutorial-example" id="tutorial-example"></div><div class="tutorial-foot"><button class="btn light" id="tutorial-back">Anterior</button><span id="tutorial-progress"></span><button class="btn primary" id="tutorial-next">Siguiente →</button></div></div></div>
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+</body></html>

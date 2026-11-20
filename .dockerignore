@@ -1,9 +1,9 @@
 .git
 .env
-.venv
+*.db
+*.sqlite*
 __pycache__
 .pytest_cache
-*.db
-tests
-README.md
-docs
+.venv
+backups
+*.zip

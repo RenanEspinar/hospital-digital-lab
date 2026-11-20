@@ -1,1 +1,0 @@
-"""Hospital Digital Lab package."""

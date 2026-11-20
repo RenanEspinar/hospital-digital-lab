@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-mkdir -p backups
-STAMP="$(date +%F-%H%M%S)"
-TEMP="/data/hospital-backup-${STAMP}.db"
-# sqlite3 backup API is safe even with WAL transactions in progress.
-docker compose exec -T -e BACKUP_FILE="$TEMP" app python -c \
-  "import sqlite3,os; src=sqlite3.connect('/data/hospital.db'); dst=sqlite3.connect(os.environ['BACKUP_FILE']); src.backup(dst); dst.close(); src.close()"
-docker compose cp "app:${TEMP}" "./backups/hospital-${STAMP}.db"
-docker compose exec -T app rm "$TEMP"
-echo "Respaldo creado: backups/hospital-${STAMP}.db"
+STAMP="$(date +%Y%m%d-%H%M%S)"
+DEST="${1:-$HOME/hospital-lab-backups/$STAMP}"
+mkdir -p "$DEST"
+chmod 700 "$DEST"
+tar --exclude='./.env' --exclude='./.git' --exclude='./.venv' --exclude='./backups' -czf "$DEST/source.tar.gz" -C "$PWD" .
+CID="$(docker compose ps -q app)"
+if [[ -z "$CID" ]]; then echo 'No hay contenedor ejecutándose; se guardó solo el código.'; exit 1; fi
+TEMP="/data/hospital-backup-$STAMP.db"
+docker compose exec -T -e BACKUP_PATH="$TEMP" app python -c \
+ 'import os,sqlite3; src=sqlite3.connect("file:/data/hospital.db?mode=ro",uri=True); dest=sqlite3.connect(os.environ["BACKUP_PATH"]); src.backup(dest); dest.close(); src.close()'
+docker cp "$CID:$TEMP" "$DEST/hospital.sqlite"
+docker compose exec -T -e BACKUP_PATH="$TEMP" app python -c \
+ 'import os; os.unlink(os.environ["BACKUP_PATH"])'
+chmod 600 "$DEST/hospital.sqlite" "$DEST/source.tar.gz"
+echo "Respaldo consistente guardado en $DEST"
