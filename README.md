@@ -1,6 +1,18 @@
-# Hospital Digital Lab · v0.3.0
+# Hospital Digital Lab · v0.3.1
 
 Simulador web educativo multiusuario para formación en sistemas hospitalarios, ingeniería biomédica, operación e interoperabilidad didáctica. **No es un sistema clínico real.** Pacientes, alarmas, parámetros, órdenes e informes son sintéticos. No se permite cargar datos personales, usar decisiones del simulador con pacientes ni conectar dispositivos médicos.
+
+## Novedad v0.3.1 — Personal presente, suplencias y activos biomédicos
+
+El docente ve en cada aula **estudiantes conectados por nombre y rol**. Una sesión se considera activa cuando registra actividad durante los últimos **45 segundos**. El botón «Automatizar» de cada departamento toma el relevo inmediatamente; «Devolver a estudiante» permite recuperar el control. Se conserva la configuración previa de roles humanos y bots permanentes.
+
+La opción **«Cubrir ausencias automáticamente (60 s)»** está **desactivada por defecto**. Si se activa, tras 60 segundos sin actividad de un rol humano el simulador activa un bot de suplencia; cuando el estudiante vuelve a ingresar o retoma su sesión, recupera el control automáticamente. El sistema no desplaza a los bots permanentes ni asigna roles diferentes a los del aula. El plazo depende de los latidos de la sesión y del motor de 5 segundos, no equivale a un SLA clínico.
+
+El inventario contiene **10 equipos de práctica** en nuevas aulas y actualiza las fichas incompletas de las aulas anteriores. Incluye fabricante/modelo ficticios, serie patrimonial ficticia, unidad, clasificación orientativa, características, último y próximo mantenimiento, notas y estado. Docente y Biomédica pueden **editar las fichas y crear nuevos activos** (hasta 80 por aula). Todos pueden consultar las fichas.
+
+Cada rol tiene un **registro libre de turno** (asunto, descripción y medición numérica opcional); Biomédica y Docente pueden vincularlo a un equipo. Queda guardado en SQLite y visible en Auditoría junto con autor, rol y fecha. **No introducir datos personales de pacientes reales, números de serie reales ni resultados de laboratorio reales.** Se generan nombres ficticios para los pacientes nuevos sin modificar los históricos.
+
+El instalador v0.3.1 genera copia consistente de SQLite y del código y **conserva la imagen Docker anterior**. Si la actualización del contenedor o la verificación de salud falla, intenta restablecer el código y la imagen anteriores; el respaldo SQLite queda disponible para recuperación manual. No ejecuta `docker compose down -v`.
 
 ## Novedad v0.3.0 — Hospital híbrido
 

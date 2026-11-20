@@ -2,7 +2,7 @@
 Esquema retrocompatible con hospital-digital-lab v0.1 (añade tablas sin destruir datos).
 """
 from __future__ import annotations
-import json, os, secrets, random, sqlite3, hashlib
+import json, os, secrets, random, sqlite3, hashlib, math
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -11,7 +11,11 @@ DB_PATH=Path(os.getenv('DATABASE_PATH','/data/hospital.db'))
 UNITS={'URG':'Urgencias','UCI':'Cuidados intensivos','HOSP':'Hospitalización','LAB':'Laboratorio','QX':'Quirófanos','BIO':'Ingeniería biomédica','FAR':'Farmacia','IMG':'Diagnóstico por imagen'}
 ROLE_ORDER=('HIS','CLINICA','LIS','BIOMED','FARMACIA','IMAGENES')
 ROLES=set(ROLE_ORDER)
+PRESENCE_SECONDS=45
+ABSENCE_GRACE_SECONDS=60
 BED_LAYOUT=[('URG',f'URG-{i:02d}') for i in range(1,5)]+[('UCI',f'UCI-{i:02d}') for i in range(1,4)]+[('HOSP',f'HOSP-{i:02d}') for i in range(1,6)]
+# Identidades de práctica inventadas; nunca representan personas atendidas.
+FICTIONAL_NAMES=('Valeria Serrano','Mateo Valcárcel','Lucía Altamirano','Emilia Barrientos','Bruno Alcázar','Camila Villarroel','Tomás Velasco','Ariana Robles','Nicolás Montenegro','Paula Arancibia','Elena Ribera','Gabriel Mendieta','Inés Sotomayor','Martín Paredes','Daniela Salinas','Santiago Aguirre')
 NAMES=[f'Paciente {i:03d}' for i in range(1,201)]
 TESTS={'Potasio':('mmol/L',4.2,6.3),'Glucosa':('mg/dL',105,48),'Hemoglobina':('g/dL',13.7,6.5)}
 MEDICATIONS={'Insumo A','Insumo B','Insumo C'}
@@ -24,6 +28,20 @@ SCENARIOS={
  'desabastecimiento':('Demora en suministro simulado','media','FAR','FARMACIA,CLINICA'),
  'imagen_urgente':('Imagen diagnóstica pendiente','media','IMG','IMAGENES,CLINICA'),
 }
+
+# Modelos, fabricantes, series y parámetros de prueba inventados para esta simulación.
+EQUIPMENT_CATALOG=[
+ ('UCI','Monitor multiparámetro','Monitor','Aurelia MedTech','Vigia MX-8','Clase IIb','ECG, SpO₂, PANI, temperatura; pantalla 12,1 pulg.'),
+ ('UCI','Monitor multiparámetro','Monitor','Aurelia MedTech','Vigia MX-8','Clase IIb','ECG, SpO₂, PANI, temperatura; pantalla 12,1 pulg.'),
+ ('UCI','Bomba de infusión','Bomba','Nivora Biomedical','Fluida IV-4','Clase IIb','Infusión volumétrica; registro ficticio de flujo y alarma.'),
+ ('URG','Desfibrilador','Desfibrilador','Orbis Salud','Pulso D-5','Clase III','Modo simulador; energía nominal ficticia 200 J.'),
+ ('URG','Monitor de urgencias','Monitor','Aurelia MedTech','Vigia ER-6','Clase IIb','ECG, SpO₂ y PANI de práctica.'),
+ ('HOSP','Bomba de infusión','Bomba','Nivora Biomedical','Fluida IV-4','Clase IIb','Infusión volumétrica de práctica.'),
+ ('QX','Estación de anestesia','Anestesia','Solventa Medical','Aeris A-9','Clase IIb','Circuitos y sensores virtuales; sin conexión a gases.'),
+ ('LAB','Analizador de química clínica','Analizador','Helixora Diagnostics','Quanta C-120','Clase IIb','Panel químico sintético y control de calidad didáctico.'),
+ ('IMG','Tomógrafo de simulación','Tomógrafo','Luminexis Imaging','Axis CT-64','Clase IIb','Adquisición simulada; sin emisión de rayos X.'),
+ ('FAR','Refrigerador de medicamentos','Refrigerador','Frionex Health','ThermoSafe R-400','Clase I','Temperatura nominal de práctica 2–8 °C.'),
+]
 
 def now():return datetime.now(timezone.utc).isoformat(timespec='seconds')
 def timeplus(seconds):return (datetime.now(timezone.utc)+timedelta(seconds=seconds)).isoformat(timespec='seconds')
@@ -64,12 +82,33 @@ def init_db():
         CREATE TABLE IF NOT EXISTS medication_orders(id INTEGER PRIMARY KEY,room_id INTEGER NOT NULL,patient_id INTEGER NOT NULL,product TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'requested',created_at TEXT NOT NULL,FOREIGN KEY(room_id) REFERENCES rooms(id) ON DELETE CASCADE,FOREIGN KEY(patient_id) REFERENCES patients(id) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS imaging_orders(id INTEGER PRIMARY KEY,room_id INTEGER NOT NULL,patient_id INTEGER NOT NULL,study TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'requested',report TEXT,created_at TEXT NOT NULL,FOREIGN KEY(room_id) REFERENCES rooms(id) ON DELETE CASCADE,FOREIGN KEY(patient_id) REFERENCES patients(id) ON DELETE CASCADE);
         CREATE TABLE IF NOT EXISTS role_staffing(room_id INTEGER NOT NULL,role TEXT NOT NULL,mode TEXT NOT NULL DEFAULT 'human',pace_seconds INTEGER NOT NULL DEFAULT 15,next_action_at TEXT,PRIMARY KEY(room_id,role),FOREIGN KEY(room_id) REFERENCES rooms(id) ON DELETE CASCADE);
+        CREATE TABLE IF NOT EXISTS practice_entries(id INTEGER PRIMARY KEY,room_id INTEGER NOT NULL,actor TEXT NOT NULL,role TEXT NOT NULL,subject TEXT NOT NULL,details TEXT NOT NULL,measurement_value REAL,measurement_unit TEXT,device_id INTEGER,created_at TEXT NOT NULL,FOREIGN KEY(room_id) REFERENCES rooms(id) ON DELETE CASCADE,FOREIGN KEY(device_id) REFERENCES devices(id));
+        CREATE INDEX IF NOT EXISTS idx_practice_room ON practice_entries(room_id,id DESC);
+        CREATE INDEX IF NOT EXISTS idx_sessions_recent ON sessions(room_id,role);
         CREATE INDEX IF NOT EXISTS idx_events_room ON events(room_id,id DESC);
         CREATE INDEX IF NOT EXISTS idx_incidents_room ON incidents(room_id,state);
         CREATE INDEX IF NOT EXISTS idx_tasks_room ON tasks(room_id,state);
         CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash);
         ''')
+    # Migración aditiva; las aulas y sesiones actuales se mantienen.
+    with connection() as db:
+        upgrades={
+            'sessions':{'last_seen_at':'TEXT'},
+            'simulation_settings':{'auto_cover_absences':'INTEGER NOT NULL DEFAULT 0','coverage_started_at':'TEXT'},
+            'role_staffing':{'auto_reason':"TEXT NOT NULL DEFAULT ''"},
+            'devices':{'manufacturer':'TEXT','model':'TEXT','serial_number':'TEXT','asset_tag':'TEXT','risk_class':'TEXT',
+                       'specifications':'TEXT','last_maintenance':'TEXT','next_maintenance':'TEXT','notes':'TEXT'},
+        }
+        for table, columns in upgrades.items():
+            have={x['name'] for x in db.execute(f'PRAGMA table_info({table})')}
+            for col, typ in columns.items():
+                if col not in have: db.execute(f'ALTER TABLE {table} ADD COLUMN {col} {typ}')
     with connection(write=True) as db:
+        # Los diez equipos existentes conservan sus estados y nombres, pero reciben fichas.
+        for r in db.execute('SELECT id,room_id,type FROM devices WHERE manufacturer IS NULL OR manufacturer=""').fetchall():
+            catalog=next((x for x in EQUIPMENT_CATALOG if x[2]==r['type']),EQUIPMENT_CATALOG[0])
+            db.execute('''UPDATE devices SET manufacturer=?,model=?,serial_number=?,asset_tag=?,risk_class=?,specifications=?,last_maintenance=COALESCE(last_maintenance,'2026-08-15'),next_maintenance=COALESCE(next_maintenance,'2027-02-15'),notes=COALESCE(notes,'Equipo ficticio; verificación exclusivamente académica.') WHERE id=?''',
+                       (catalog[3],catalog[4],f'FIC-{r["room_id"]:03d}-{r["id"]:05d}',f'BIO-{r["room_id"]:03d}-{r["id"]:04d}',catalog[5],catalog[6],r['id']))
         db.execute("INSERT OR IGNORE INTO simulation_settings(room_id,mode,interval_seconds,difficulty) SELECT id,'manual',120,'normal' FROM rooms")
         for role in ROLE_ORDER:
             db.execute("INSERT OR IGNORE INTO role_staffing(room_id,role,mode,pace_seconds) SELECT id,?,'human',15 FROM rooms",(role,))
@@ -81,12 +120,10 @@ def record(db,room,actor,role,kind,message,payload=None):
 
 def seed_room(db,room):
     for unit,label in BED_LAYOUT:db.execute('INSERT INTO beds(room_id,unit,label) VALUES(?,?,?)',(room,unit,label))
-    for unit,name,typ in [
-        ('UCI','Monitor multiparámetro M-101','Monitor'),('UCI','Monitor multiparámetro M-102','Monitor'),('UCI','Bomba de infusión B-201','Bomba'),
-        ('URG','Desfibrilador D-101','Desfibrilador'),('URG','Monitor M-103','Monitor'),('HOSP','Bomba de infusión B-202','Bomba'),
-        ('QX','Máquina de anestesia A-101','Anestesia'),('LAB','Analizador de química L-101','Analizador'),('IMG','Tomógrafo T-101','Tomógrafo'),('FAR','Refrigerador farmacéutico R-101','Refrigerador')]:
-        db.execute('INSERT INTO devices(room_id,unit,name,type,state) VALUES(?,?,?,?,?)',(room,unit,name,typ,'operativo'))
-    for unit,name,age in [('URG','Paciente 001',42),('UCI','Paciente 002',67),('HOSP','Paciente 003',29)]:
+    for idx,(unit,name,typ,manufacturer,model,risk,specs) in enumerate(EQUIPMENT_CATALOG,1):
+        db.execute("""INSERT INTO devices(room_id,unit,name,type,state,manufacturer,model,serial_number,asset_tag,risk_class,specifications,last_maintenance,next_maintenance,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           (room,unit,name+' '+f'{idx:02d}',typ,'operativo',manufacturer,model,f'FIC-{room:03d}-{idx:05d}',f'BIO-{room:03d}-{idx:04d}',risk,specs,'2026-08-15','2027-02-15','Activo inventariado; todos los datos son ficticios.'))
+    for unit,name,age in [('URG',FICTIONAL_NAMES[0],42),('UCI',FICTIONAL_NAMES[1],67),('HOSP',FICTIONAL_NAMES[2],29)]:
         bed=db.execute('SELECT id FROM beds WHERE room_id=? AND unit=? AND id NOT IN (SELECT bed_id FROM patients WHERE room_id=?) LIMIT 1',(room,unit,room)).fetchone()
         db.execute('INSERT INTO patients(room_id,name,age,bed_id,created_at) VALUES(?,?,?,?,?)',(room,name,age,bed['id'],now()))
     record(db,room,'Sistema','SISTEMA','aula_iniciada','Hospital ficticio inicializado. Ninguna información representa pacientes reales.')
@@ -113,19 +150,58 @@ def list_rooms():
 
 def is_automated_role(room,role):
     with connection() as db:
-        row=db.execute("SELECT mode FROM role_staffing WHERE room_id=? AND role=?",(room,role)).fetchone()
+        row=db.execute('SELECT mode FROM role_staffing WHERE room_id=? AND role=?',(room,role)).fetchone()
         return bool(row and row['mode']=='auto')
+
+def can_join_role(room,role):
+    with connection() as db:
+        row=db.execute('SELECT mode,auto_reason FROM role_staffing WHERE room_id=? AND role=?',(room,role)).fetchone()
+        return not row or row['mode']!='auto' or row['auto_reason']=='absence'
+
+def restore_student_station(db,room,role,name):
+    if room is None or role not in ROLES:return
+    slot=db.execute('SELECT mode,auto_reason FROM role_staffing WHERE room_id=? AND role=?',(room,role)).fetchone()
+    if slot and slot['mode']=='auto' and slot['auto_reason']=='absence':
+        db.execute("UPDATE role_staffing SET mode='human',auto_reason='',next_action_at=NULL WHERE room_id=? AND role=?",(room,role))
+        record(db,room,name,role,'cobertura_finalizada',f'{role} retomó el control; agente de ausencia detenido.')
 
 def register_session(room,name,role):
     token=secrets.token_urlsafe(40)
-    with connection(write=True) as db:db.execute('INSERT INTO sessions(token_hash,room_id,name,role,expires_at) VALUES(?,?,?,?,?)',(digest(token),room,name,role,timeplus(43200)))
+    with connection(write=True) as db:
+        if role in ROLES:
+            slot=db.execute('SELECT mode,auto_reason FROM role_staffing WHERE room_id=? AND role=?',(room,role)).fetchone()
+            if slot and slot['mode']=='auto' and slot['auto_reason']!='absence':
+                raise ActionError('Estación reservada a agente virtual.')
+            restore_student_station(db,room,role,name)
+        db.execute('INSERT INTO sessions(token_hash,room_id,name,role,expires_at,last_seen_at) VALUES(?,?,?,?,?,?)',(digest(token),room,name,role,timeplus(43200),now()))
     return token
 
-def get_session(token):
-    if not token or len(token)>256:return None
-    with connection() as db:
+def get_session(token,touch=False):
+    if not token or not isinstance(token,str) or len(token)>256:return None
+    with connection(write=touch) as db:
         r=db.execute('SELECT * FROM sessions WHERE token_hash=?',(digest(token),)).fetchone()
-        return dict(r) if r and r['expires_at']>now() else None
+        if not r or r['expires_at']<=now():return None
+        if touch:
+            db.execute('UPDATE sessions SET last_seen_at=? WHERE id=?',(now(),r['id']))
+            restore_student_station(db,r['room_id'],r['role'],r['name'])
+        return dict(r)
+
+def absence_tick():
+    """Cubre ausencias transcurridos 60 s; no altera las estaciones automáticas manuales."""
+    changed=set()
+    with connection(write=True) as db:
+        slots=db.execute("""SELECT s.room_id,s.role,s.pace_seconds,c.coverage_started_at
+            FROM role_staffing s JOIN simulation_settings c ON s.room_id=c.room_id
+            WHERE c.auto_cover_absences=1 AND s.mode='human'""").fetchall()
+        for slot in slots:
+            room,role=slot['room_id'],slot['role']
+            latest=db.execute("SELECT MAX(last_seen_at) FROM sessions WHERE room_id=? AND role=? AND expires_at>?",(room,role,now())).fetchone()[0]
+            anchor=max([v for v in (latest,slot['coverage_started_at']) if v],default=now())
+            if datetime.fromisoformat(anchor)>datetime.now(timezone.utc)-timedelta(seconds=ABSENCE_GRACE_SECONDS):continue
+            db.execute("UPDATE role_staffing SET mode='auto',auto_reason='absence',next_action_at=? WHERE room_id=? AND role=? AND mode='human'",(timeplus(slot['pace_seconds']),room,role))
+            record(db,room,'Sistema','SISTEMA','cobertura_ausencia',f'Rol {role} sin actividad por al menos 60 s; agente suplente activado.',{'role':role})
+            changed.add(room)
+    return list(changed)
 
 def rows(db,query,*args):return [dict(r) for r in db.execute(query,args)]
 
@@ -147,9 +223,19 @@ def room_state(room):
         for e in events:
             try:e['payload']=json.loads(e['payload'])
             except ValueError:e['payload']={}
-        participants=rows(db,'SELECT role,COUNT(*) AS n FROM sessions WHERE room_id=? AND expires_at>? GROUP BY role',room,now())
+        recent=rows(db,"SELECT id,name,role,last_seen_at FROM sessions WHERE room_id=? AND expires_at>? AND role!='DOCENTE' ORDER BY COALESCE(last_seen_at,'') DESC,id DESC LIMIT 150",room,now())
+        cutoff=timeplus(-PRESENCE_SECONDS)
+        seen_names=set();student_sessions=[]
+        for person in recent:
+            key=(person['role'],person['name'].casefold())
+            if key in seen_names:continue
+            seen_names.add(key)
+            person['online']=bool(person['last_seen_at'] and person['last_seen_at']>=cutoff)
+            student_sessions.append(person)
+        participants={r:sum(x['online'] and x['role']==r for x in student_sessions) for r in ROLE_ORDER}
+
         settings=db.execute('SELECT * FROM simulation_settings WHERE room_id=?',(room,)).fetchone()
-        staffing=rows(db,"SELECT role,mode,pace_seconds,next_action_at FROM role_staffing WHERE room_id=? ORDER BY CASE role WHEN 'HIS' THEN 0 WHEN 'CLINICA' THEN 1 WHEN 'LIS' THEN 2 WHEN 'BIOMED' THEN 3 WHEN 'FARMACIA' THEN 4 ELSE 5 END",room)
+        staffing=rows(db,"SELECT role,mode,pace_seconds,next_action_at,auto_reason FROM role_staffing WHERE room_id=? ORDER BY CASE role WHEN 'HIS' THEN 0 WHEN 'CLINICA' THEN 1 WHEN 'LIS' THEN 2 WHEN 'BIOMED' THEN 3 WHEN 'FARMACIA' THEN 4 ELSE 5 END",room)
         ack_times=[];resolve_times=[]
         for a in alarms:
             if a['acknowledged_at']:
@@ -161,9 +247,10 @@ def room_state(room):
                 except ValueError:pass
         active=sum(i['state']=='active' for i in incidents)
         pending=sum(t['state']=='pending' for t in tasks)
+        practices=rows(db,'SELECT * FROM practice_entries WHERE room_id=? ORDER BY id DESC LIMIT 80',room)
         return {'room':dict(x),'units':UNITS,'beds':beds,'patients':patients,'devices':devices,'alarms':alarms,
             'orders':lab,'med_orders':meds,'imaging_orders':imgs,'arrivals':arrivals,'incidents':incidents,'tasks':tasks,
-            'events':events,'participants':{p['role']:p['n'] for p in participants},'settings':dict(settings) if settings else {'mode':'manual'},'staffing':staffing,
+            'events':events,'practice_entries':practices,'student_sessions':student_sessions,'participants':participants,'settings':dict(settings) if settings else {'mode':'manual'},'staffing':staffing,
             'metrics':{'beds_total':len(beds),'beds_occupied':sum(bool(b['patient_id']) for b in beds),
                 'occupancy_pct':round(100*sum(bool(b['patient_id']) for b in beds)/len(beds),1) if beds else 0,
                 'devices_total':len(devices),'devices_operational':sum(x['state']=='operativo' for x in devices),
@@ -213,7 +300,7 @@ def spawn(db,room,scenario,actor='Sistema',role='SISTEMA'):
         if waiting>=5:raise ActionError('Hay demasiados pacientes sintéticos pendientes de admisión.')
         next_num=db.execute('SELECT COUNT(*) FROM arrivals WHERE room_id=?',(room,)).fetchone()[0]+100
         i=incident(db,room,scenario,'Paciente ficticio en sala de espera','Un nuevo ingreso requiere una cama libre en Urgencias u Hospitalización. La clínica debe registrar su recepción.', 'URG','media')
-        arr=db.execute('INSERT INTO arrivals(room_id,name,unit,created_at) VALUES(?,?,?,?)',(room,f'Paciente {next_num:03d}','URG',now())).lastrowid
+        arr=db.execute('INSERT INTO arrivals(room_id,name,unit,created_at) VALUES(?,?,?,?)',(room,FICTIONAL_NAMES[next_num%len(FICTIONAL_NAMES)]+' · '+str(next_num),'URG',now())).lastrowid
         task(db,room,i,'HIS','Asignar cama al paciente en espera','Elegir una cama disponible y completar la admisión desde HIS.',f'arrival_admitted:{arr}')
         task(db,room,i,'CLINICA','Registrar recepción clínica','Confirmar recepción del ingreso mediante la acción de la estación clínica.',f'arrival_received:{arr}')
     elif scenario=='resultado_critico':
@@ -285,7 +372,10 @@ def action(room,actor,role,kind,target_id=None,value=None):
     'imaging_order':{'CLINICA','DOCENTE'},'imaging_result':{'IMAGENES','DOCENTE'},'imaging_review':{'CLINICA','DOCENTE'},
     'device_status':{'BIOMED','DOCENTE'},'device_check':{'BIOMED','DOCENTE'},'arrival_receive':{'CLINICA','DOCENTE'},
     'alarm_ack':{'CLINICA','BIOMED','DOCENTE'},'scenario_spawn':{'DOCENTE'},'simulation_config':{'DOCENTE'},'reset_room':{'DOCENTE'},
-    'trigger_alarm':{'DOCENTE'},'simulation_staffing':{'DOCENTE'},}
+    'trigger_alarm':{'DOCENTE'},'simulation_staffing':{'DOCENTE'},
+    'staffing_role':{'DOCENTE'},'coverage_config':{'DOCENTE'},
+    'device_update':{'BIOMED','DOCENTE'},'device_create':{'BIOMED','DOCENTE'},
+    'practice_entry':set(ROLE_ORDER)|{'DOCENTE'},}
     if kind not in allowed or role not in allowed[kind]:raise ActionError('Tu rol no está autorizado para esta acción.')
     with connection(write=True) as db:
         def check(table,i):
@@ -303,7 +393,7 @@ def action(room,actor,role,kind,target_id=None,value=None):
             if db.execute('SELECT 1 FROM patients WHERE bed_id=?',(bid,)).fetchone():raise ActionError('La cama está ocupada.')
             if len(rows(db,'SELECT id FROM patients WHERE room_id=?',room))>=len(NAMES):raise ActionError('Se alcanzó el límite de pacientes sintéticos.')
             num=db.execute('SELECT COUNT(*) FROM patients WHERE room_id=?',(room,)).fetchone()[0]
-            name=arr['name'] if arr else f'Paciente {num+1:03d}'
+            name=arr['name'] if arr else FICTIONAL_NAMES[(num+3)%len(FICTIONAL_NAMES)]+' · '+str(num+1).zfill(3)
             db.execute('INSERT INTO patients(room_id,name,age,bed_id,created_at) VALUES(?,?,?,?,?)',(room,name,30+(num*7)%48,bid,now()))
             if arr:db.execute("UPDATE arrivals SET state='admitted' WHERE id=?",(target_id,))
             record(db,room,actor,role,'admision',f'{name} ingresó en {bed["label"]}.',{'resourceType':'Encounter','location':bed['label']})
@@ -384,6 +474,68 @@ def action(room,actor,role,kind,target_id=None,value=None):
             if a['kind']=='technical' and a['source_id']:
                 x=check('devices',a['source_id'])
                 if x and x['state']=='operativo':db.execute("UPDATE alarms SET state='resolved' WHERE id=?",(target_id,))
+        elif kind=='practice_entry':
+            try: payload=json.loads(value)
+            except (TypeError,ValueError):raise ActionError('Registro de práctica inválido.')
+            if not isinstance(payload,dict):raise ActionError('Registro de práctica inválido.')
+            subject=str(payload.get('subject','')).strip();details=str(payload.get('details','')).strip()
+            if not 3<=len(subject)<=90 or not 5<=len(details)<=500:raise ActionError('Asunto: 3–90 caracteres. Observación: 5–500.')
+            measured=payload.get('measurement_value')
+            if measured is not None:
+                if type(measured) not in (int,float) or not math.isfinite(measured) or abs(measured)>1e9:raise ActionError('Valor medido no válido.')
+            unit=str(payload.get('measurement_unit','')).strip()
+            if len(unit)>30 or any(ord(c)<32 for c in unit):raise ActionError('Unidad no válida.')
+            dev_id=payload.get('device_id')
+            if dev_id is not None and (type(dev_id) is not int or not check('devices',dev_id)):raise ActionError('Equipo no válido.')
+            if dev_id is not None and role not in ('BIOMED','DOCENTE'):raise ActionError('Solo Biomédica puede asociar lecturas a equipos.')
+            entry=db.execute('INSERT INTO practice_entries(room_id,actor,role,subject,details,measurement_value,measurement_unit,device_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)',
+                (room,actor,role,subject,details,measured,unit,dev_id,now())).lastrowid
+            record(db,room,actor,role,'observacion',f'{subject}: {details}',{'entry_id':entry,'device_id':dev_id,'value':measured,'unit':unit})
+        elif kind in ('device_create','device_update'):
+            try:payload=json.loads(value)
+            except (TypeError,ValueError):raise ActionError('Ficha técnica inválida.')
+            if not isinstance(payload,dict):raise ActionError('Ficha técnica inválida.')
+            fields={'name':100,'type':45,'unit':10,'manufacturer':80,'model':80,'serial_number':60,'asset_tag':60,'risk_class':40,'specifications':350,'last_maintenance':10,'next_maintenance':10,'notes':500}
+            info={}
+            for key,limit in fields.items():
+                if key in payload:
+                    v=payload[key]
+                    if not isinstance(v,str) or len(v.strip())>limit or any(ord(c)<32 and c not in '\n\t' for c in v):raise ActionError('Campo técnico inválido: '+key)
+                    info[key]=v.strip()
+            for key in ('last_maintenance','next_maintenance'):
+                if info.get(key):
+                    try:datetime.strptime(info[key],'%Y-%m-%d')
+                    except ValueError:raise ActionError('Fecha inválida: '+key)
+            if 'unit' in info and info['unit'] not in UNITS:raise ActionError('Servicio hospitalario no válido.')
+            if kind=='device_update':
+                dev=check('devices',target_id)
+                if not dev:raise ActionError('Equipo inexistente.')
+                if not info:raise ActionError('No se indicaron cambios.')
+                db.execute('UPDATE devices SET '+','.join(f'{k}=?' for k in info)+' WHERE id=?',(*info.values(),target_id))
+                record(db,room,actor,role,'ficha_equipo',f'Ficha del equipo #{target_id} actualizada.',{'device_id':target_id,'fields':list(info)})
+            else:
+                if not info.get('name') or not info.get('type') or not info.get('unit'):raise ActionError('El equipo requiere nombre, tipo y servicio.')
+                if db.execute('SELECT COUNT(*) FROM devices WHERE room_id=?',(room,)).fetchone()[0]>=80:raise ActionError('Límite didáctico de 80 equipos por aula.')
+                cols=['room_id','state']+list(info)
+                vals=[room,'operativo']+list(info.values())
+                dev_id=db.execute('INSERT INTO devices('+','.join(cols)+') VALUES('+','.join('?' for _ in cols)+')',vals).lastrowid
+                record(db,room,actor,role,'equipo_creado',f'Equipo ficticio #{dev_id}: {info["name"]}',{'device_id':dev_id})
+        elif kind=='staffing_role':
+            try:cfg=json.loads(value)
+            except (TypeError,ValueError):raise ActionError('Asignación de rol inválida.')
+            if not isinstance(cfg,dict) or cfg.get('role') not in ROLES or cfg.get('mode') not in ('human','auto'):raise ActionError('Rol o modo inválido.')
+            station=cfg['role']; mode=cfg['mode']
+            pace=db.execute('SELECT pace_seconds FROM role_staffing WHERE room_id=? AND role=?',(room,station)).fetchone()
+            if not pace:raise ActionError('Rol inexistente.')
+            db.execute("UPDATE role_staffing SET mode=?,auto_reason='',next_action_at=? WHERE room_id=? AND role=?",(mode,timeplus(pace[0]) if mode=='auto' else None,room,station))
+            record(db,room,actor,role,'rol_reasignado',f'{station}: '+('agente automático' if mode=='auto' else 'estudiante')+'.',{'role':station,'mode':mode})
+        elif kind=='coverage_config':
+            if value not in ('on','off'):raise ActionError('Configuración de cobertura inválida.')
+            enabled=value=='on'
+            db.execute('UPDATE simulation_settings SET auto_cover_absences=?,coverage_started_at=? WHERE room_id=?',(int(enabled),now() if enabled else None,room))
+            if not enabled:
+                db.execute("UPDATE role_staffing SET mode='human',auto_reason='',next_action_at=NULL WHERE room_id=? AND auto_reason='absence'",(room,))
+            record(db,room,actor,role,'cobertura_configurada','Cobertura automática de ausencias: '+('activada (60 s)' if enabled else 'desactivada')+'.')
         elif kind in ('scenario_spawn','trigger_alarm'):
             scenario=value if kind=='scenario_spawn' else 'desaturacion'
             if kind=='trigger_alarm' and value not in ('UCI','URG','HOSP'):raise ActionError('Unidad inválida.')
@@ -407,14 +559,14 @@ def action(room,actor,role,kind,target_id=None,value=None):
                 raise ActionError('Selecciona de 1 a 6 roles humanos y un ritmo permitido.')
             for station in ROLE_ORDER:
                 mode='human' if station in humans else 'auto'
-                db.execute('UPDATE role_staffing SET mode=?,pace_seconds=?,next_action_at=? WHERE room_id=? AND role=?',
+                db.execute("UPDATE role_staffing SET mode=?,auto_reason='',pace_seconds=?,next_action_at=? WHERE room_id=? AND role=?",
                     (mode,pace,timeplus(pace) if mode=='auto' else None,room,station))
             record(db,room,actor,role,'personal_configurado',
                    f'Personal: {len(humans)} áreas humanas y {len(ROLE_ORDER)-len(humans)} agentes automáticos; ritmo base {pace}s.',
                    {'human_roles':humans,'auto_roles':[r for r in ROLE_ORDER if r not in humans],'pace_seconds':pace})
         elif kind=='reset_room':
             if value!='CONFIRMAR':raise ActionError('Confirmación requerida.')
-            for tbl in ('tasks','incidents','arrivals','medication_orders','imaging_orders','alarms','lab_orders','patients','devices','beds','events'):
+            for tbl in ('practice_entries','tasks','incidents','arrivals','medication_orders','imaging_orders','alarms','lab_orders','patients','devices','beds','events'):
                 db.execute(f'DELETE FROM {tbl} WHERE room_id=?',(room,))
             db.execute("UPDATE simulation_settings SET mode='manual',next_event_at=NULL WHERE room_id=?",(room,))
             seed_room(db,room)

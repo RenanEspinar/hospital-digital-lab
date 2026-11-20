@@ -1,4 +1,4 @@
-"""API de Hospital Digital Lab v0.3: solo simulación, no uso clínico."""
+"""API de Hospital Digital Lab v0.3.1: solo simulación, no uso clínico."""
 from __future__ import annotations
 import asyncio,csv,io,os,secrets,time
 from collections import defaultdict,deque
@@ -34,8 +34,9 @@ async def auto_loop():
         await asyncio.sleep(5)
         try:
             generated=await asyncio.to_thread(db.auto_tick)
+            covered=await asyncio.to_thread(db.absence_tick)
             processed=await asyncio.to_thread(bots.auto_staff_tick)
-            for rid in set(generated+processed):await connections.send(rid)
+            for rid in set(generated+covered+processed):await connections.send(rid)
         except Exception as e:
             import logging
             logging.getLogger(__name__).exception('Fallo del motor: %s',e)
@@ -51,7 +52,7 @@ async def lifespan(app):
         work.cancel()
         with suppress(asyncio.CancelledError):await work
 
-app=FastAPI(title='Hospital Digital Lab',version='0.3.0',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
+app=FastAPI(title='Hospital Digital Lab',version='0.3.1',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
 
 @app.middleware('http')
 async def security(request:Request,call_next):
@@ -70,7 +71,7 @@ def static(name:str):
     if name not in ('app.js','styles.css'):raise HTTPException(404)
     return FileResponse(STATIC/name)
 @app.get('/healthz')
-def health():return {'status':'ok','application':'hospital-digital-lab','version':'0.3.0'}
+def health():return {'status':'ok','application':'hospital-digital-lab','version':'0.3.1'}
 
 class Login(BaseModel):password:str=Field(min_length=1,max_length=200)
 class Join(BaseModel):
@@ -81,12 +82,12 @@ class NewRoom(BaseModel):title:str=Field(min_length=3,max_length=90)
 class Action(BaseModel):
     kind:str=Field(max_length=60)
     target_id:int|None=None
-    value:str|None=Field(default=None,max_length=600)
+    value:str|None=Field(default=None,max_length=2300)
 
 def authenticate(req:Request):
     bearer=req.headers.get('Authorization','')
     if not bearer.startswith('Bearer '):raise HTTPException(401,'Inicia sesión.')
-    session=db.get_session(bearer[7:])
+    session=db.get_session(bearer[7:],touch=True)
     if not session:raise HTTPException(401,'Sesión vencida o inválida.')
     return session
 
@@ -109,10 +110,12 @@ def join(p:Join,req:Request):
     if p.role not in db.ROLES:raise HTTPException(400,'Rol no válido.')
     room=db.find_room(p.code.strip().upper())
     if not room:raise HTTPException(404,'Código de aula incorrecto.')
-    if db.is_automated_role(room['id'],p.role):raise HTTPException(409,'Esta área está asignada a un agente automático. Selecciona un rol humano o pide al docente que cambie la configuración.')
+    if not db.can_join_role(room['id'],p.role):raise HTTPException(409,'Esta área está asignada a un agente automático. Selecciona un rol humano o pide al docente que cambie la configuración.')
     name=p.name.strip()
     if len(name)<2 or any(ord(c)<32 for c in name):raise HTTPException(400,'Nombre no válido.')
-    return {'token':db.register_session(room['id'],name,p.role),'role':p.role,'name':name,'room':room,'expires_hours':12}
+    try:token=db.register_session(room['id'],name,p.role)
+    except db.ActionError as e:raise HTTPException(409,str(e))
+    return {'token':token,'role':p.role,'name':name,'room':room,'expires_hours':12}
 @app.post('/api/rooms')
 def create(p:NewRoom,s=Depends(authenticate)):
     if s['role']!='DOCENTE':raise HTTPException(403)
@@ -155,7 +158,7 @@ async def socket(ws:WebSocket,code:str):
         await ws.close(code=1008);return
     if not isinstance(hello,dict) or hello.get('type')!='auth':
         await ws.close(code=1008);return
-    session=db.get_session(hello.get('token',''))
+    session=db.get_session(hello.get('token',''),touch=True)
     room=db.find_room(code)
     if not session or not room or (session['role']!='DOCENTE' and session['room_id']!=room['id']):
         await ws.close(code=1008);return
@@ -164,6 +167,8 @@ async def socket(ws:WebSocket,code:str):
         await ws.send_json({'type':'connected'})
         while True:
             msg=await ws.receive_text()
-            if msg=='ping':await ws.send_json({'type':'pong'})
+            if msg=='ping':
+                db.get_session(hello.get('token',''),touch=True)
+                await ws.send_json({'type':'pong'})
     except WebSocketDisconnect:pass
     finally:connections.clients[room['id']].discard(ws)

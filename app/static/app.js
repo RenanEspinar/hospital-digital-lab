@@ -10,7 +10,7 @@ BIOMED:[['Tu estación es Biomédica','Administras estado y verificación de equ
 FARMACIA:[['Tu estación es Farmacia','Gestionas suministros ficticios, no medicamentos de pacientes reales.','Todas las órdenes usan productos genéricos de simulación.'],['Identifica solicitudes','Busca las órdenes emitidas por Clínica y los incidentes asociados.','Prioriza las solicitudes vinculadas a incidentes abiertos.'],['Confirma dispensación','Selecciona una orden pendiente y ejecuta «Dispensar».','La orden pasa a estado dispensada y el equipo clínico la ve en tiempo real.'],['Cierra el circuito','Clínica registra la recepción del suministro después de tu dispensación.','Ambos pasos completan el flujo de coordinación.']],
 IMAGENES:[['Tu estación es Imagenología','Procesas solicitudes ficticias de radiografía, ecografía y tomografía.','Este entorno no procesa imágenes DICOM reales.'],['Localiza los estudios','Selecciona una solicitud pendiente en tu cola.','Un incidente puede generar automáticamente una orden prioritaria.'],['Informa el estudio','Publica un «Informe A» o «Informe B», ambos ficticios y no diagnósticos.','Clínica recibe la notificación de informe pendiente de revisión.'],['Cierra la comunicación','La confirmación de lectura por Clínica completa el flujo del incidente.','Toda la secuencia queda auditada.']]};
 const STATUS={waiting:'En espera',admitted:'Admitido',received:'Recibido',requested:'Solicitado',resulted:'Informado',dispensed:'Dispensado',reported:'Informado',reviewed:'Revisado',pending:'Pendiente',completed:'Completada',active:'Abierto',resolved:'Resuelto',acknowledged:'Reconocida',operativo:'Operativo',en_falla:'En falla'};
-const M={session:null,code:null,data:null,rooms:[],socket:null,refreshInterval:null,busy:false,ward:'URG',view:'overview',step:0,staffDirty:false,seen:new Set(),audio:false,audioContext:null};
+const M={session:null,code:null,data:null,rooms:[],socket:null,refreshInterval:null,pingInterval:null,busy:false,ward:'URG',view:'overview',step:0,staffDirty:false,deviceEditId:null,deviceEditorLoaded:null,seen:new Set(),audio:false,audioContext:null};
 try{const s=JSON.parse(sessionStorage.getItem('hdlsession')||'null');if(s)M.session=s}catch{}
 function el(tag,cls,text){const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=String(text);return n}
 function clear(x){x.replaceChildren()}
@@ -23,11 +23,11 @@ async function session(s){M.session=s;sessionStorage.setItem('hdlsession',JSON.s
 async function openSession(first=false){$('welcome').classList.add('hidden');$('workspace').classList.remove('hidden');const role=M.session.role,info=ROLE[role];$('identity-role').textContent=info[0];$('identity-user').textContent=M.session.name;$('role-avatar').textContent=info[1];$('station-title').textContent=info[0];$('station-tag').textContent=role;$('station-description').textContent=info[2];$('teacher-panel').classList.toggle('hidden',role!=='DOCENTE');$('welcome-line').textContent=info[2];if(role==='DOCENTE'){await loadRooms();if(!M.code&&M.rooms.length)M.code=M.rooms[0].code}await openRoom();if(first){const key='hdltutorial-v02-'+role;if(!sessionStorage.getItem(key))showTutorial()}}
 async function loadRooms(){M.rooms=await api('/api/rooms');const s=$('room-select');clear(s);M.rooms.forEach(r=>{const o=el('option','',`${r.title} · ${r.code}`);o.value=r.code;s.append(o)});if(M.code&&M.rooms.some(r=>r.code===M.code))s.value=M.code}
 async function createRoom(ev){ev.preventDefault();const f=new FormData(ev.currentTarget);try{const r=await api('/api/rooms','POST',{title:String(f.get('title')).trim()});M.code=r.code;await loadRooms();await openRoom();$('new-room').reset();toast('Aula creada. Código de acceso: '+r.code)}catch(e){toast(e.message,true)}}
-async function openRoom(){if(M.socket){M.socket.close();M.socket=null}if(M.refreshInterval){clearInterval(M.refreshInterval);M.refreshInterval=null}M.staffDirty=false;if(!M.code){$('no-rooms').classList.remove('hidden');$('dashboard').classList.add('hidden');$('room-title').textContent='Crea tu primera aula';return}$('no-rooms').classList.add('hidden');$('dashboard').classList.remove('hidden');await refresh();connect();M.refreshInterval=setInterval(refresh,12000)}
+async function openRoom(){if(M.socket){M.socket.close();M.socket=null}if(M.refreshInterval){clearInterval(M.refreshInterval);M.refreshInterval=null}if(M.pingInterval){clearInterval(M.pingInterval);M.pingInterval=null}M.staffDirty=false;M.deviceEditId=null;M.deviceEditorLoaded=null;if(!M.code){$('no-rooms').classList.remove('hidden');$('dashboard').classList.add('hidden');$('room-title').textContent='Crea tu primera aula';return}$('no-rooms').classList.add('hidden');$('dashboard').classList.remove('hidden');await refresh();connect();M.refreshInterval=setInterval(refresh,12000);M.pingInterval=setInterval(()=>{if(M.socket?.readyState===WebSocket.OPEN)M.socket.send('ping')},15000)}
 function connect(){const ws=new WebSocket((location.protocol==='https:'?'wss:':'ws:')+'//'+location.host+'/ws/'+encodeURIComponent(M.code));M.socket=ws;ws.onopen=()=>ws.send(JSON.stringify({type:'auth',token:M.session.token}));ws.onmessage=ev=>{try{if(JSON.parse(ev.data).type==='refresh')refresh()}catch{}};ws.onclose=()=>{if(M.socket===ws&&M.session){$('connection-label').textContent='RECONECTANDO';setTimeout(()=>{if(M.socket===ws&&M.session)connect()},3500)}};ws.onerror=()=>ws.close()}
 async function refresh(){if(!M.code||M.busy)return;M.busy=true;try{const d=await api('/api/state/'+encodeURIComponent(M.code));notify(d);M.data=d;render();$('connection-label').textContent='EN LÍNEA'}catch(e){$('connection-label').textContent='SIN CONEXIÓN';if(e.message.includes('Sesión vencida'))logout();else toast(e.message,true)}finally{M.busy=false}}
 function notify(d){const active=d.incidents.filter(i=>i.state==='active').map(i=>i.id);if(M.data){const newItems=d.incidents.filter(i=>i.state==='active'&&!M.seen.has(i.id));if(newItems.length){toast('Nuevo incidente: '+newItems[0].title);if(M.audio)beep()}}M.seen=new Set([...M.seen,...active])}
-function logout(){M.socket?.close();M.socket=null;if(M.refreshInterval)clearInterval(M.refreshInterval);M.refreshInterval=null;sessionStorage.removeItem('hdlsession');M.session=null;M.data=null;M.code=null;$('workspace').classList.add('hidden');$('welcome').classList.remove('hidden');$('connection-label').textContent='ENTORNO DOCENTE'}
+function logout(){M.socket?.close();M.socket=null;if(M.refreshInterval)clearInterval(M.refreshInterval);M.refreshInterval=null;if(M.pingInterval)clearInterval(M.pingInterval);M.pingInterval=null;sessionStorage.removeItem('hdlsession');M.session=null;M.data=null;M.code=null;$('workspace').classList.add('hidden');$('welcome').classList.remove('hidden');$('connection-label').textContent='ENTORNO DOCENTE'}
 function showTutorial(){M.step=0;$('tutorial').classList.remove('hidden');renderTutorial()}
 function closeTutorial(){sessionStorage.setItem('hdltutorial-v02-'+M.session.role,'1');$('tutorial').classList.add('hidden')}
 function renderTutorial(){const slides=GUIDE[M.session.role],s=slides[M.step];$('tutorial-icon').textContent=String(M.step+1).padStart(2,'0');$('tutorial-title').textContent=s[0];$('tutorial-text').textContent=s[1];$('tutorial-example').textContent=s[2];$('tutorial-progress').textContent=(M.step+1)+' / '+slides.length;$('tutorial-back').disabled=M.step===0;$('tutorial-next').textContent=M.step===slides.length-1?'Comenzar simulación ✓':'Siguiente →';clear($('step-track'));slides.forEach((_,i)=>$('step-track').append(el('span',i<=M.step?'active':'')))}
@@ -36,11 +36,11 @@ function fmt(iso){if(!iso)return '—';return new Date(iso).toLocaleString('es-B
 function badge(text,cls=''){return el('span','chip '+cls,text)}
 function messageEmpty(root,msg){root.append(el('div','empty-list',msg))}
 function render(){if(!M.data)return;const d=M.data,m=d.metrics;$('room-title').textContent=d.room.title;$('room-code').textContent=d.room.code;$('room-subtitle').textContent=M.session.role==='DOCENTE'?'CENTRO DE CONTROL DOCENTE':'HOSPITAL VIRTUAL / '+ROLE[M.session.role][0].toUpperCase();$('metric-occupancy').textContent=m.occupancy_pct+' %';$('metric-occupation-detail').textContent=m.beds_occupied+' de '+m.beds_total+' camas';$('metric-devices').textContent=m.devices_operational+' / '+m.devices_total;$('metric-incidents').textContent=m.incidents_active;$('metric-done').textContent=m.incidents_resolved+' cerrados';$('metric-tasks').textContent=m.tasks_pending;$('metric-ack').textContent=m.mean_ack_seconds===null?'—':m.mean_ack_seconds+' s';$('metric-labs').textContent=m.lab_pending;$('nav-count').textContent=m.incidents_active;
- renderTeacher();renderMap();renderIncidents();renderStation();renderTasks();renderPatients();renderDevices();renderAudit()}
-function renderTeacher(){if(M.session.role!=='DOCENTE')return;const s=M.data.settings;$('room-select').value=M.code;$('simulation-mode').value=s.mode;$('simulation-difficulty').value=s.difficulty;$('simulation-interval').value=String(s.interval_seconds);if(!$('simulation-interval').value)$('simulation-interval').value='120';$('engine-state').textContent=s.mode==='auto'?'Automático · próximo evento: '+fmt(s.next_event_at):s.mode==='paused'?'Motor pausado · sin eventos automáticos':'Motor manual · eventos por docente';renderStaffing()}
+ renderTeacher();renderMap();renderIncidents();renderStation();renderTasks();renderPatients();renderDevices();renderAudit();renderPracticeEntries();renderPracticeFields()}
+function renderTeacher(){if(M.session.role!=='DOCENTE')return;const s=M.data.settings;$('room-select').value=M.code;$('simulation-mode').value=s.mode;$('simulation-difficulty').value=s.difficulty;$('simulation-interval').value=String(s.interval_seconds);if(!$('simulation-interval').value)$('simulation-interval').value='120';$('engine-state').textContent=s.mode==='auto'?'Automático · próximo evento: '+fmt(s.next_event_at):s.mode==='paused'?'Motor pausado · sin eventos automáticos':'Motor manual · eventos por docente';renderStaffing();renderPresence()}
 
 const HUMAN_ROLES=['HIS','CLINICA','LIS','BIOMED','FARMACIA','IMAGENES'];
-const STAFF_PRESETS={2:['CLINICA','LIS'],3:['HIS','CLINICA','LIS'],4:['HIS','CLINICA','LIS','BIOMED'],6:HUMAN_ROLES};
+const STAFF_PRESETS={2:['CLINICA','LIS'],3:['CLINICA','BIOMED','LIS'],4:['HIS','CLINICA','LIS','BIOMED'],6:HUMAN_ROLES};
 function staffingSelected(){return [...document.querySelectorAll('.staff-human:checked')].map(x=>x.value)}
 function previewStaffing(){const n=staffingSelected().length;$('staffing-summary').textContent=n+' humanos · '+(6-n)+' virtuales'+(M.staffDirty?' · sin guardar':'')}
 function renderStaffing(){
@@ -65,6 +65,36 @@ async function saveStaffing(){
   await api('/api/action/'+encodeURIComponent(M.code),'POST',{kind:'simulation_staffing',value:JSON.stringify({human_roles,pace_seconds:Number($('staffing-pace').value)})});
   M.staffDirty=false;await refresh();toast('Personal asignado: '+human_roles.length+' áreas humanas y '+(6-human_roles.length)+' virtuales.');
  }catch(e){toast(e.message,true)}
+}
+
+function renderPresence(){
+ const root=$('presence-roles');clear(root);
+ const staff=M.data.staffing||[],people=M.data.student_sessions||[];
+ const on=people.filter(p=>p.online);
+ $('presence-summary').textContent=on.length+' estudiante(s) activo(s)';
+ if(document.activeElement!==$('coverage-auto'))$('coverage-auto').checked=Boolean(M.data.settings.auto_cover_absences);
+ for(const role of HUMAN_ROLES){
+  const slot=staff.find(x=>x.role===role)||{mode:'human'};
+  const found=people.filter(p=>p.role===role);
+  const active=found.filter(p=>p.online),offline=found.filter(p=>!p.online);
+  const row=el('div','presence-role');const body=el('div','presence-details');
+  body.append(el('strong','',ROLE[role][0]));
+  const status=slot.mode==='auto'?(slot.auto_reason==='absence'?'SUPLENCIA POR AUSENCIA':'BOT PERMANENTE'):(active.length?'CONECTADO':'SIN ESTUDIANTES ACTIVOS');
+  const small=el('small','',status);small.classList.add(slot.mode==='auto'?'present-bot':active.length?'present-online':'present-offline');body.append(small);
+  const names=found.length?active.map(p=>p.name+' · en línea').concat(offline.slice(0,2).map(p=>p.name+' · sin actividad')).join(' / '):'Sin estudiantes registrados';
+  body.append(el('span','',names));row.append(body);
+  const btn=el('button','btn '+(slot.mode==='auto'?'light':'primary'),slot.mode==='auto'?'Devolver a estudiante':'Automatizar');
+  btn.type='button';btn.onclick=async()=>{
+   if(M.staffDirty){toast('Guarda o descarta primero la distribución general.',true);return}
+   btn.disabled=true;
+   await run('staffing_role',null,JSON.stringify({role,mode:slot.mode==='auto'?'human':'auto'}));
+  };
+  row.append(btn);root.append(row);
+ }
+}
+async function saveCoverage(){
+ const enabled=$('coverage-auto').checked;
+ await run('coverage_config',null,enabled?'on':'off');
 }
 
 function renderMap(){const d=M.data;clear($('ward-map'));Object.entries(d.units).forEach(([unit,name])=>{const beds=d.beds.filter(b=>b.unit===unit);const devices=d.devices.filter(b=>b.unit===unit);const alarm=d.alarms.filter(a=>a.unit===unit&&a.state==='active').length;const w=el('button','ward'+(unit===M.ward?' active':''));w.type='button';w.append(el('span','ward-top',unit));w.append(el('strong','',name));w.append(el('small',alarm?'● '+alarm+' alerta(s)':beds.length?`${beds.filter(b=>b.patient_id).length}/${beds.length} camas`:devices.length+' dispositivos'));if(alarm)w.lastChild.classList.add('alerting');w.addEventListener('click',()=>{M.ward=unit;renderMap()});$('ward-map').append(w)});const unit=M.ward,box=$('ward-detail');clear(box);const head=el('div','ward-detail-head');head.append(el('span','',d.units[unit]),badge(unit));box.append(head);const list=el('div','ward-detail-list');const beds=d.beds.filter(b=>b.unit===unit);const dv=d.devices.filter(b=>b.unit===unit);const alarms=d.alarms.filter(a=>a.unit===unit&&a.state==='active');for(const b of beds){const row=el('div','unit-entry');row.append(el('span','',b.label),el('b',b.patient_id?'':'good',b.patient_name||'Libre'));list.append(row)}for(const x of dv){const row=el('div','unit-entry');row.append(el('span','',x.name),el('b',x.state==='operativo'?'good':'bad',STATUS[x.state]));list.append(row)}for(const a of alarms){const row=el('div','unit-entry');row.append(el('span','','Alarma #'+a.id),el('b','bad','ACTIVA'));list.append(row)}if(!list.children.length)messageEmpty(list,'Sin activos registrados en esta unidad.');box.append(list)}
@@ -108,8 +138,97 @@ function renderStation(){const d=M.data,role=M.session.role,box=$('station-actio
  }
 }
 function renderTasks(){const root=$('my-tasks');clear(root);const r=M.session.role;const tasks=M.data.tasks.filter(t=>t.state==='pending'&&(r==='DOCENTE'||t.role===r));$('my-task-count').textContent=tasks.length+' pendientes';for(const t of tasks){const line=el('div','task-row');line.append(el('span','dot'));const b=el('div');b.append(el('b','',t.title),el('small','',t.description),el('small','',t.incident_title));line.append(b);root.append(line)}if(!tasks.length)messageEmpty(root,'No tienes tareas de incidentes pendientes. Puedes practicar con tu estación.')}
-function renderPatients(){clear($('patient-list'));clear($('arrival-list'));for(const p of M.data.patients){const row=el('div','list-line');const info=el('div');info.append(el('b','',p.name),el('span','',p.bed_label+' · '+M.data.units[p.unit]));row.append(info,badge('Hospitalizado','good'));$('patient-list').append(row)}for(const a of M.data.arrivals){const row=el('div','list-line');const info=el('div');info.append(el('b','',a.name),el('span','',fmt(a.created_at)));row.append(info,badge(STATUS[a.state]||a.state,a.state==='waiting'?'high':'good'));$('arrival-list').append(row)}if(!M.data.arrivals.length)messageEmpty($('arrival-list'),'No hay nuevos ingresos en espera.')}
-function renderDevices(){clear($('device-list'));for(const x of M.data.devices){const row=el('div','list-line');const info=el('div');info.append(el('b','',x.name),el('span','',M.data.units[x.unit]+' · '+x.type));row.append(info,badge(STATUS[x.state],x.state==='en_falla'?'high':'good'));$('device-list').append(row)}}
+function renderPatients(){clear($('patient-list'));clear($('arrival-list'));for(const p of M.data.patients){const row=el('div','list-line');const info=el('div');info.append(el('b','',p.name),el('span','',p.age+' años · '+p.bed_label+' · '+M.data.units[p.unit]));row.append(info,badge('Hospitalizado','good'));$('patient-list').append(row)}for(const a of M.data.arrivals){const row=el('div','list-line');const info=el('div');info.append(el('b','',a.name),el('span','',fmt(a.created_at)));row.append(info,badge(STATUS[a.state]||a.state,a.state==='waiting'?'high':'good'));$('arrival-list').append(row)}if(!M.data.arrivals.length)messageEmpty($('arrival-list'),'No hay nuevos ingresos en espera.')}
+function renderDevices(){
+ const root=$('device-list');clear(root);
+ for(const x of M.data.devices){
+  const row=el('div','list-line device-item');const info=el('div');
+  info.append(el('b','',x.name),el('span','',(x.manufacturer||'Fabricante ficticio')+' · '+(x.model||'Modelo no registrado')),
+   el('span','',M.data.units[x.unit]+' · '+x.type+' · '+(x.asset_tag||'Sin inventario')));
+  const right=el('div','device-actions');right.append(badge(STATUS[x.state]||x.state,x.state==='en_falla'?'high':'good'));
+  const btn=el('button','btn light','Ver ficha');btn.type='button';btn.onclick=()=>{M.deviceEditId=x.id;M.deviceEditorLoaded=null;renderDeviceEditor(true);$('device-editor').scrollIntoView({behavior:'smooth',block:'nearest'})};
+  right.append(btn);row.append(info,right);root.append(row)
+ }
+ if(!M.data.devices.length)messageEmpty(root,'Aún no hay equipos en este hospital.');
+ renderDeviceEditor();
+}
+function deviceInput(name,label,value,formType='text',options=null){
+ const wrapper=el('label','',label);
+ let control;
+ if(name==='notes'||name==='specifications'){
+  control=el('textarea');control.rows=3;
+ }else if(options){
+  control=el('select');for(const [key,text] of options){const opt=el('option','',text);opt.value=key;control.append(opt)}
+ }else{control=el('input');control.type=formType}
+ control.name=name;control.value=value||'';if(name==='name'||name==='type')control.required=true;
+ control.maxLength=({name:100,type:45,manufacturer:80,model:80,serial_number:60,asset_tag:60,risk_class:40,specifications:350,notes:500})[name]||100;
+ wrapper.append(control);return wrapper;
+}
+function renderDeviceEditor(force=false){
+ const root=$('device-editor'),canEdit=['BIOMED','DOCENTE'].includes(M.session.role);
+ if(!M.data.devices.length&&!canEdit){clear(root);messageEmpty(root,'Sin equipos.');return}
+ if(M.deviceEditId===null&&M.data.devices.length)M.deviceEditId=M.data.devices[0].id;
+ const dev=M.data.devices.find(d=>d.id===M.deviceEditId),editingNew=M.deviceEditId==='new';
+ const key=String(M.deviceEditId);
+ if(!force&&M.deviceEditorLoaded===key&&root.children.length)return; // Preservar lo que se escribe entre refrescos.
+ M.deviceEditorLoaded=key;clear(root);
+ const bar=el('div','device-head');bar.append(el('h3','',editingNew?'Nuevo equipo ficticio':dev?.name||'Equipo no seleccionado'));
+ if(canEdit){const create=el('button','btn light','+ Registrar equipo');create.type='button';create.onclick=()=>{M.deviceEditId='new';M.deviceEditorLoaded=null;renderDeviceEditor(true)};bar.append(create)}
+ root.append(bar);
+ if(!canEdit){
+  if(!dev)return;
+  const data=[['Fabricante ficticio',dev.manufacturer],['Modelo',dev.model],['Serie',dev.serial_number],['Activo',dev.asset_tag],['Riesgo',dev.risk_class],['Último mantenimiento',dev.last_maintenance],['Próximo mantenimiento',dev.next_maintenance],['Especificaciones de simulación',dev.specifications],['Notas',dev.notes]];
+  const detail=el('dl','device-readonly');data.forEach(([label,value])=>{detail.append(el('dt','',label),el('dd','',value||'—'))});root.append(detail);return;
+ }
+ const form=el('form','device-form');form.id='device-form';
+ const grid=el('div','device-form-grid');
+ const fields=[['name','Nombre del equipo'],['type','Tipo'],['unit','Servicio'],['manufacturer','Fabricante ficticio'],['model','Modelo ficticio'],['serial_number','Número de serie'],['asset_tag','Código patrimonial'],['risk_class','Clasificación de riesgo didáctica'],['last_maintenance','Mantenimiento anterior'],['next_maintenance','Próximo mantenimiento'],['specifications','Características técnicas simuladas'],['notes','Observaciones']];
+ for(const [field,label] of fields){
+  const vals=field==='unit'?Object.entries(M.data.units):null;
+  const widget=deviceInput(field,label,dev?.[field]||'',field.endsWith('maintenance')?'date':'text',vals);
+  if(['notes','specifications'].includes(field))widget.classList.add('wide');grid.append(widget);
+ }
+ form.append(grid);
+ const buttons=el('div','device-form-actions');
+ const save=el('button','btn primary',editingNew?'Crear activo':'Guardar ficha técnica');save.type='submit';buttons.append(save);form.append(buttons);
+ form.onsubmit=async ev=>{
+  ev.preventDefault();const data=Object.fromEntries(new FormData(form));if(!data.name.trim()||!data.type.trim()){toast('Nombre y tipo son obligatorios.',true);return}
+  const kind=editingNew?'device_create':'device_update';
+  save.disabled=true;
+  try{await api('/api/action/'+encodeURIComponent(M.code),'POST',{kind,target_id:editingNew?null:dev.id,value:JSON.stringify(data)});
+   M.deviceEditId=null;M.deviceEditorLoaded=null;toast(editingNew?'Equipo ficticio creado.':'Ficha técnica actualizada.');await refresh();
+  }catch(e){toast(e.message,true)}finally{save.disabled=false}
+ };
+ root.append(form);
+}
+function renderPracticeFields(){
+ const label=$('practice-device-label'),s=$('practice-device');
+ label.classList.toggle('hidden',!['BIOMED','DOCENTE'].includes(M.session.role));
+ const selected=s.value,items=M.data.devices;
+ if([...s.options].length!==items.length+1||items.some((d,i)=>s.options[i+1]?.value!==String(d.id))){
+  clear(s);const none=el('option','','Sin equipo');none.value='';s.append(none);
+  items.forEach(d=>{const option=el('option','',d.name+' · '+(d.asset_tag||d.unit));option.value=String(d.id);s.append(option)});
+  s.value=selected;
+ }
+}
+async function submitPractice(ev){
+ ev.preventDefault();const form=ev.currentTarget,fd=new FormData(form);
+ const raw=String(fd.get('measurement')||'').trim();const num=raw?Number(raw):null;
+ if(raw&&!Number.isFinite(num)){toast('Medición numérica inválida.',true);return}
+ const id=String(fd.get('device')||'');const payload={subject:String(fd.get('subject')||'').trim(),details:String(fd.get('details')||'').trim(),measurement_value:num,measurement_unit:String(fd.get('unit')||'').trim(),device_id:id?Number(id):null};
+ const submit=form.querySelector('[type="submit"]');submit.disabled=true;
+ try{await api('/api/action/'+encodeURIComponent(M.code),'POST',{kind:'practice_entry',value:JSON.stringify(payload)});form.reset();toast('Observación registrada en la bitácora.');await refresh()}
+ catch(e){toast(e.message,true)}finally{submit.disabled=false}
+}
+function renderPracticeEntries(){
+ const root=$('practice-list');clear(root);
+ for(const r of M.data.practice_entries||[]){
+  const row=el('div','audit-item');row.append(el('small','',fmt(r.created_at)+' · '+r.actor+' · '+r.role),el('b','',r.subject),el('p','',r.details));
+  if(r.measurement_value!==null)row.append(el('small','',r.measurement_value+' '+(r.measurement_unit||'')+(r.device_id?' · Equipo #'+r.device_id:'')));
+  root.append(row)
+ }
+ if(!root.children.length)messageEmpty(root,'Sin registros libres todavía.');
+}
 function drawSyntheticWave(){
  const canvas=$('ecg');if(!canvas)return;const ctx=canvas.getContext('2d');if(!ctx)return;const w=canvas.width,h=canvas.height;const critical=Boolean(M.data?.incidents.some(x=>x.state==='active'&&x.scenario==='desaturacion'));$('monitor-hr').textContent=critical?'105':'78';$('monitor-oxygen').textContent=critical?'84':'98';$('monitor-oxygen').classList.toggle('critical',critical);$('monitor-state').textContent=critical?'ESCENARIO ACTIVO':'DATOS SINTÉTICOS';$('monitor-state').classList.toggle('danger-text',critical);ctx.clearRect(0,0,w,h);ctx.strokeStyle='#254650';ctx.lineWidth=.6;for(let x=0;x<w;x+=26){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke()}for(let y=0;y<h;y+=24){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke()}ctx.strokeStyle=critical?'#f47e84':'#57e2b4';ctx.lineWidth=2;ctx.beginPath();let phase=Date.now()/30;for(let x=0;x<w;x++){let v=((x+phase)%109)/109;const gauss=(mu,sigma,amp)=>amp*Math.exp(-Math.pow((v-mu)/sigma,2));let y=h*.56-gauss(.16,.05,6)+gauss(.38,.02,9)-gauss(.42,.011,33)+gauss(.45,.025,14)-gauss(.67,.08,7);if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.stroke();
 }
@@ -124,7 +243,7 @@ function beep(){if(!M.audioContext)return;const ctx=M.audioContext;try{const o=c
 function init(){
  setInterval(drawSyntheticWave,120);
  $('tab-student').onclick=()=>signin('student');$('tab-teacher').onclick=()=>signin('teacher');$('student-form').onsubmit=join;$('teacher-form').onsubmit=teacher;$('new-room').onsubmit=createRoom;$('logout').onclick=logout;$('logout-top').onclick=logout;$('tutorial-open-top').onclick=showTutorial;$('tutorial-open').onclick=showTutorial;$('tutorial-close').onclick=closeTutorial;$('tutorial-back').onclick=()=>{M.step=Math.max(0,M.step-1);renderTutorial()};$('tutorial-next').onclick=()=>{if(M.step>=GUIDE[M.session.role].length-1)closeTutorial();else{M.step++;renderTutorial()}};
- $('room-select').onchange=async ev=>{M.code=ev.target.value;await openRoom()};$('save-simulation').onclick=config;$('save-staffing').onclick=saveStaffing;$('staffing-pace').onchange=()=>{M.staffDirty=true;previewStaffing()};document.querySelectorAll('[data-staff-preset]').forEach(b=>b.onclick=()=>presetStaffing(Number(b.dataset.staffPreset)));$('scenario-actions').onclick=scenario;$('reset-room').onclick=reset;$('export-csv').onclick=downloadCSV;$('enable-audio').onclick=enableAudio;$('refresh-data').onclick=refresh;$('copy-code').onclick=async()=>{try{await navigator.clipboard.writeText(M.code);toast('Código copiado.')}catch{toast('Código: '+M.code)}};
+ $('room-select').onchange=async ev=>{M.code=ev.target.value;await openRoom()};$('save-simulation').onclick=config;$('save-staffing').onclick=saveStaffing;$('coverage-save').onclick=saveCoverage;$('practice-form').onsubmit=submitPractice;$('staffing-pace').onchange=()=>{M.staffDirty=true;previewStaffing()};document.querySelectorAll('[data-staff-preset]').forEach(b=>b.onclick=()=>presetStaffing(Number(b.dataset.staffPreset)));$('scenario-actions').onclick=scenario;$('reset-room').onclick=reset;$('export-csv').onclick=downloadCSV;$('enable-audio').onclick=enableAudio;$('refresh-data').onclick=refresh;$('copy-code').onclick=async()=>{try{await navigator.clipboard.writeText(M.code);toast('Código copiado.')}catch{toast('Código: '+M.code)}};
  document.querySelectorAll('[data-view]').forEach(n=>n.onclick=()=>changeView(n.dataset.view));document.querySelectorAll('[data-goto]').forEach(n=>n.onclick=()=>changeView(n.dataset.goto));
  if(M.session)openSession().catch(e=>{toast(e.message,true);logout()});
 }

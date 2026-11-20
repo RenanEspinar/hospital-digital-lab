@@ -1,36 +1,23 @@
-# Actualización desde Ubuntu Server — Hospital Digital Lab v0.3.0
+# Actualización segura v0.3.1 — homeserverv2 (Ubuntu)
 
-**Servidor de trabajo:** `homeserverv2`, directorio `~/apps/hospital-digital-lab`.
+**No ejecutar mientras los estudiantes trabajan.** Requiere acceso por SSH a `~/apps/hospital-digital-lab`, credenciales de GitHub `gh` ya configuradas y Docker Compose v2.
 
-No hace falta otra PC, PowerShell ni `rclone` si el servidor permite descargar el ZIP desde Google Drive, como en la versión anterior.
+- Descargar el ZIP y comprobar SHA-256 antes de ejecutar el script. No descargar ejecutables de URL diferentes a la compartida por el docente.
+- Extraer el ZIP en un directorio temporal y ejecutar `bash scripts/release_on_server.sh "$HOME/apps/hospital-digital-lab"` desde la carpeta extraída.
+- El script publica en GitHub `RenanEspinar/hospital-digital-lab` y despliega únicamente `app`, nunca otros contenedores.
+- Antes de copiar, el instalador guarda `source.tar.gz` y respaldo consistente `hospital.sqlite` en `~/hospital-lab-backups/antes-de-v031-...` con permisos restrictivos. Conserva también una etiqueta de la imagen Docker anterior `hospital-digital-lab:rollback-...`.
+- Ante fallo en la actualización o en `/healthz`, intenta regresar el código y la imagen anteriores. El respaldo SQLite no se restaura automáticamente porque eso podría descartar nuevas operaciones. Si el servicio sigue inaccesible tras el intento, conservar la carpeta de respaldo y solicitar reparación antes de impartir clase.
+- La migración de esquema SQLite es aditiva y conserva aulas, pacientes, órdenes, incidentes, sesiones y auditoría anteriores. No ejecutar `docker compose down -v`.
 
-## Despliegue
-
-La versión se distribuye en `hospital-digital-lab-v0.3.0.zip`. Descarga el archivo a `/tmp` con `curl` usando su enlace de Drive. **Verifica SHA-256** antes de descomprimir. Desde el directorio extraído ejecuta:
-
-```bash
-bash scripts/release_on_server.sh "$HOME/apps/hospital-digital-lab"
-```
-
-Requiere `gh` autenticado como `RenanEspinar`. El script:
-
-1. Clona `main` a una carpeta temporal y copia el código sin `.env`, bases de datos ni secretos.
-2. Valida los archivos y publica un commit en GitHub.
-3. Hace un respaldo SQLite consistente mediante el contenedor actual a `~/hospital-lab-backups/antes-de-v03-.../` y guarda una copia del código.
-4. Actualiza **solo el servicio `app`** de Docker y espera una respuesta `healthz` con `version: 0.3.0`.
-
-Si falla el push, no se inicia el despliegue. Si Docker no inicia, **el script no aplica rollback automático**: revisa `docker compose logs --tail=100 app` y conserva el respaldo. Nunca uses `docker compose down -v`.
-
-## Verificación
+Validación final en el servidor:
 
 ```bash
 cd ~/apps/hospital-digital-lab
 docker compose ps
 curl -fsS http://127.0.0.1:8765/healthz
+# Debe indicar version: 0.3.1
 ```
 
-Se espera `"version":"0.3.0"` y un contenedor saludable. Después valida en navegador el panel docente: distribución 3/4 estudiantes, guardar, un incidente con Farmacia/Imagenología virtual y actuación humana de Clínica.
+Validar interfaz: entrar como docente, seleccionar un aula de pruebas, elegir **3 estudiantes** y verificar que aparecen seis departamentos. Acceder desde un segundo navegador como LIS y confirmar que aparece el nombre y estado conectado; abrir **Equipamiento** y editar una ficha ficticia; registrar una nota de prueba; generar manualmente un incidente. Se recomienda dejar `Cubrir ausencias automáticamente` desactivado hasta terminar esa comprobación.
 
-## Compatibilidad
-
-La migración agrega `role_staffing` y no elimina tablas existentes ni aulas. La configuración inicial de las aulas previas permanece con seis roles humanos. El acceso HTTPS/proxy, la clave `ADMIN_PASSWORD` y el volumen de SQLite permanecen intactos.
+**Limitaciones conocidas:** el conteo de conexión es actividad reciente, no telemetría de enlace; los bots no sustituyen un juicio clínico. Datos ficticios exclusivamente.

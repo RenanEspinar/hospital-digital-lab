@@ -17,7 +17,7 @@ if [[ "$GH_LOGIN" != 'RenanEspinar' ]]; then
   echo "GitHub autenticado como $GH_LOGIN, esperaba RenanEspinar; cancelado." >&2; exit 1
 fi
 gh auth setup-git
-TEMP="$(mktemp -d /tmp/hospital-v03-publish.XXXXXXXX)"
+TEMP="$(mktemp -d /tmp/hospital-v031-publish.XXXXXXXX)"
 trap 'rm -rf "$TEMP"' EXIT
 printf '=== 1. Clonando la rama main actual ===\n'
 git clone --quiet --depth 1 --branch main "https://github.com/${REPO}.git" "$TEMP/repo"
@@ -35,7 +35,7 @@ if ! git -C "$TEMP/repo" diff --cached --quiet; then
   GH_ID="$(gh api user --jq '.id')"
   git -C "$TEMP/repo" config user.name "$GH_LOGIN"
   git -C "$TEMP/repo" config user.email "${GH_ID}+${GH_LOGIN}@users.noreply.github.com"
-  git -C "$TEMP/repo" commit -m 'feat: hybrid hospital staffing with virtual departments v0.3.0'
+  git -C "$TEMP/repo" commit -m 'feat: student presence, absence coverage and biomedical inventory v0.3.1'
   git -C "$TEMP/repo" push origin HEAD:main
 else
   echo 'GitHub ya contiene la misma versión.'
