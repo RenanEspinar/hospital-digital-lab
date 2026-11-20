@@ -1,0 +1,31 @@
+name: hospital-digital-lab
+services:
+  app:
+    build: .
+    image: hospital-digital-lab:local
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /data/hospital.db
+    ports:
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8765}:8000"
+    volumes:
+      - hospital_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 150
+    mem_limit: 384m
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+volumes:
+  hospital_data:
